@@ -1,0 +1,159 @@
+function charAt(text: string, index: int): string {
+    return text.substring(index, index + 1);
+}
+
+function skipWhitespace(text: string, index: int): int {
+    let current: int = index;
+    while (current < text.length()) {
+        let ch: string = charAt(text, current);
+        if (ch == " " || ch == "\n" || ch == "\r" || ch == "\t") {
+            current = current + 1;
+            continue;
+        }
+        break;
+    }
+    return current;
+}
+
+function valueStart(text: string, key: string): int {
+    let marker: string = "\"" + key + "\"";
+    let keyIndex: int = text.indexOf(marker);
+    if (keyIndex < 0) {
+        return -1;
+    }
+
+    let tailStart: int = keyIndex + marker.length();
+    let tail: string = text.substring(tailStart, text.length());
+    let colonOffset: int = tail.indexOf(":");
+    if (colonOffset < 0) {
+        return -1;
+    }
+
+    return skipWhitespace(text, tailStart + colonOffset + 1);
+}
+
+function parseQuoted(text: string, start: int): string {
+    let index: int = start + 1;
+    let out: string = "";
+    let escape: bool = false;
+
+    while (index < text.length()) {
+        let ch: string = charAt(text, index);
+        if (escape) {
+            if (ch == "\"") out = out + "\"";
+            else if (ch == "\\") out = out + "\\";
+            else if (ch == "/") out = out + "/";
+            else if (ch == "b") out = out + "\b";
+            else if (ch == "f") out = out + "\f";
+            else if (ch == "n") out = out + "\n";
+            else if (ch == "r") out = out + "\r";
+            else if (ch == "t") out = out + "\t";
+            else out = out + ch;
+            escape = false;
+            index = index + 1;
+            continue;
+        }
+
+        if (ch == "\\") {
+            escape = true;
+            index = index + 1;
+            continue;
+        }
+
+        if (ch == "\"") {
+            return out;
+        }
+
+        out = out + ch;
+        index = index + 1;
+    }
+
+    return out;
+}
+
+export function jsonString(text: string, key: string): Optional<string> {
+    let start: int = valueStart(text, key);
+    if (start < 0 || charAt(text, start) != "\"") {
+        return None;
+    }
+    return parseQuoted(text, start);
+}
+
+export function jsonNumber(text: string, key: string): Optional<float> {
+    let start: int = valueStart(text, key);
+    if (start < 0) {
+        return None;
+    }
+
+    let index: int = start;
+    while (index < text.length()) {
+        let ch: string = charAt(text, index);
+        if ((ch >= "0" && ch <= "9") || ch == "." || ch == "-" || ch == "+" || ch == "e" || ch == "E") {
+            index = index + 1;
+            continue;
+        }
+        break;
+    }
+
+    let value: string = text.substring(start, index).trim();
+    if (value == "") {
+        return None;
+    }
+    return parseFloat(value);
+}
+
+export function jsonBoolean(text: string, key: string): Optional<bool> {
+    let start: int = valueStart(text, key);
+    if (start < 0) {
+        return None;
+    }
+
+    let tail: string = text.substring(start, text.length());
+    if (tail.startsWith("true")) {
+        return true;
+    }
+    if (tail.startsWith("false")) {
+        return false;
+    }
+    return None;
+}
+
+export function jsonStringArray(text: string, key: string): string[] {
+    let start: int = valueStart(text, key);
+    if (start < 0 || charAt(text, start) != "[") {
+        return [];
+    }
+
+    let index: int = start + 1;
+    let out: string[] = [];
+
+    while (index < text.length()) {
+        index = skipWhitespace(text, index);
+        let ch: string = charAt(text, index);
+        if (ch == "]") {
+            return out;
+        }
+        if (ch != "\"") {
+            return out;
+        }
+
+        out.push(parseQuoted(text, index));
+
+        index = index + 1;
+        while (index < text.length() && charAt(text, index) != "\"") {
+            index = index + 1;
+        }
+        index = index + 1;
+        index = skipWhitespace(text, index);
+        let sep: string = charAt(text, index);
+        if (sep == ",") {
+            index = index + 1;
+            continue;
+        }
+        if (sep == "]") {
+            return out;
+        }
+    }
+
+    return out;
+}

@@ -1,0 +1,292 @@
+import std:binary;
+import { Map } from "std:collections";
+import { nowMs } from "std:time";
+import { Response, createJsonResponse } from "../../modules/server/index.tx";
+import {
+    AppOrder,
+    AppUser,
+    DatabaseSnapshot,
+    OrderCollection,
+    PublicUser,
+    UserCollection,
+    UserPayload,
+    publicUser
+} from "../models/domain.tx";
+import { nextId, findIndexById, recordEvent, touchDatabase, insertUser, updateUser, deleteUser } from "../services/database.tx";
+
+function jsonError(message: string, status: int): Response {
+    return createJsonResponse({ error: message }, status);
+}
+
+function bytesMatch(data: int[], start: int, pattern: int[]): bool {
+    if (start + pattern.length() > data.length()) {
+        return false;
+    }
+    for (let i: int = 0; i < pattern.length(); i++) {
+        if (data[start + i] != pattern[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function bytesIndexOf(data: int[], pattern: int[], start: int): int {
+    let limit: int = data.length() - pattern.length();
+    for (let i: int = start; i <= limit; i++) {
+        if (bytesMatch(data, i, pattern)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+let USER_NAME_MARKER: int[] = binary.fromString("\"name\"");
+let USER_EMAIL_MARKER: int[] = binary.fromString("\"email\"");
+let USER_PASSWORD_MARKER: int[] = binary.fromString("\"password\"");
+let USER_ROLE_MARKER: int[] = binary.fromString("\"role\"");
+
+function byteStringField(bytes: int[], marker: int[]): Optional<string> {
+    let keyIndex: int = bytesIndexOf(bytes, marker, 0);
+    if (keyIndex < 0) {
+        return None;
+    }
+
+    let index: int = keyIndex + marker.length();
+    while (index < bytes.length() && bytes[index] != 58) {
+        index = index + 1;
+    }
+    if (index >= bytes.length()) {
+        return None;
+    }
+
+    index = index + 1;
+    while (index < bytes.length()) {
+        let ch: int = bytes[index];
+        if (ch == 32 || ch == 10 || ch == 13 || ch == 9) {
+            index = index + 1;
+            continue;
+        }
+        break;
+    }
+
+    if (index >= bytes.length() || bytes[index] != 34) {
+        return None;
+    }
+
+    index = index + 1;
+    let out: int[] = [];
+    let escape: bool = false;
+    while (index < bytes.length()) {
+        let ch: int = bytes[index];
+        if (escape) {
+            out.push(ch);
+            escape = false;
+            index = index + 1;
+            continue;
+        }
+        if (ch == 92) {
+            escape = true;
+            index = index + 1;
+            continue;
+        }
+        if (ch == 34) {
+            return binary.toString(out);
+        }
+        out.push(ch);
+        index = index + 1;
+    }
+
+    return None;
+}
+
+function parseBody(body: string): UserPayload {
+    let bytes: int[] = binary.fromString(body);
+    if (bytes.length() == 0) {
+        throw new Error("Request body is required");
+    }
+
+    let payload = new UserPayload();
+    payload.name = byteStringField(bytes, USER_NAME_MARKER);
+    payload.email = byteStringField(bytes, USER_EMAIL_MARKER);
+    payload.password = byteStringField(bytes, USER_PASSWORD_MARKER);
+    payload.role = byteStringField(bytes, USER_ROLE_MARKER);
+    return payload;
+}
+
+function getUser(users: UserCollection, id: string): Optional<AppUser> {
+    return users.items.get(id);
+}
+
+function getOrder(orders: OrderCollection, id: string): Optional<AppOrder> {
+    return orders.items.get(id);
+}
+
+export function sanitizeUser(user: AppUser): PublicUser {
+    return publicUser(user);
+}
+
+export function usersPayload(users: UserCollection): any {
+    let safeItems: any = {};
+
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let userId: string = users.ids[i];
+        let maybeUser: Optional<AppUser> = getUser(users, userId);
+        if (maybeUser == None) {
+            continue;
+        }
+
+        safeItems[userId] = sanitizeUser(maybeUser as AppUser);
+    }
+
+    return {
+        count: users.ids.length(),
+        ids: users.ids,
+        items: safeItems
+    };
+}
+
+export function findUserIndexByEmail(users: UserCollection, email: string): int {
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let maybeUser: Optional<AppUser> = getUser(users, users.ids[i]);
+        if (maybeUser != None && (maybeUser as AppUser).email == email) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+function addUserToStore(users: UserCollection, user: AppUser): void {
+    users.ids.push(user.id);
+    users.items.set(user.id, user);
+    insertUser(user);
+}
+
+function removeUserFromStore(users: UserCollection, id: string): void {
+    let index: int = findIndexById(users.ids, id);
+    if (index < 0) {
+        return;
+    }
+
+    let newIds: string[] = [];
+    let newItems = new Map<string, AppUser>();
+
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let userId: string = users.ids[i];
+        if (userId == id) {
+            continue;
+        }
+
+        let maybeUser: Optional<AppUser> = getUser(users, userId);
+        if (maybeUser != None) {
+            newIds.push(userId);
+            newItems.set(userId, maybeUser as AppUser);
+        }
+    }
+
+    users.ids = newIds;
+    users.items = newItems;
+    deleteUser(id);
+}
+
+export function handleUsersCollection(method: string, body: string, db: DatabaseSnapshot): Response {
+    let users: UserCollection = db.users;
+
+    if (method == "GET") {
+        return createJsonResponse(usersPayload(users), 200);
+    }
+
+    if (method == "POST") {
+        try {
+            let payload: UserPayload = parseBody(body);
+            if (payload.name == None || payload.email == None || payload.password == None) {
+                return jsonError("name, email and password are required", 400);
+            }
+
+            let email: string = payload.email as string;
+            if (findUserIndexByEmail(users, email) >= 0) {
+                return jsonError("User email already exists", 409);
+            }
+
+            let role: string = payload.role != None ? payload.role as string : "customer";
+            let userId: string = nextId("user", users.ids);
+            let user = new AppUser(
+                userId,
+                payload.name as string,
+                email,
+                payload.password as string,
+                role,
+                nowMs()
+            );
+
+            addUserToStore(users, user);
+            recordEvent(db, "created", "user", userId);
+            touchDatabase(db);
+            return createJsonResponse(sanitizeUser(user), 201);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    return jsonError("Method not allowed", 405);
+}
+
+export function handleUserItem(method: string, body: string, db: DatabaseSnapshot, userId: string): Response {
+    let users: UserCollection = db.users;
+    let userValue: Optional<AppUser> = getUser(users, userId);
+    if (userValue == None) {
+        return jsonError("User not found", 404);
+    }
+
+    let user: AppUser = userValue as AppUser;
+
+    if (method == "GET") {
+        return createJsonResponse(sanitizeUser(user), 200);
+    }
+
+    if (method == "PUT") {
+        try {
+            let payload: UserPayload = parseBody(body);
+            if (payload.name != None) {
+                user.name = payload.name as string;
+            }
+            if (payload.email != None) {
+                let email: string = payload.email as string;
+                let otherIndex: int = findUserIndexByEmail(users, email);
+                if (otherIndex >= 0 && users.ids[otherIndex] != userId) {
+                    return jsonError("User email already exists", 409);
+                }
+                user.email = email;
+            }
+            if (payload.role != None) {
+                user.role = payload.role as string;
+            }
+            if (payload.password != None) {
+                user.password = payload.password as string;
+            }
+
+            updateUser(userId, user);
+            recordEvent(db, "updated", "user", userId);
+            touchDatabase(db);
+            return createJsonResponse(sanitizeUser(user), 200);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    if (method == "DELETE") {
+        for (let i: int = 0; i < db.orders.ids.length(); i++) {
+            let orderId: string = db.orders.ids[i];
+            let orderValue: Optional<AppOrder> = getOrder(db.orders, orderId);
+            if (orderValue != None && (orderValue as AppOrder).userId == userId) {
+                return jsonError("User has orders and cannot be deleted", 409);
+            }
+        }
+
+        removeUserFromStore(users, userId);
+        recordEvent(db, "deleted", "user", userId);
+        touchDatabase(db);
+        return createJsonResponse({ deleted: true, id: userId }, 200);
+    }
+
+    return jsonError("Method not allowed", 405);
+}

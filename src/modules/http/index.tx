@@ -1,0 +1,94 @@
+import { stringify } from "std:json";
+import { Map } from "std:collections";
+import { HttpClient, HttpClientResponse, copyHeaders, createHeaders, createJsonHeaders } from "./client.tx";
+
+let httpClient = new HttpClient("http", "80", false);
+let httpsClient = new HttpClient("https", "443", false);
+let httpsInsecureClient = new HttpClient("https", "443", true);
+
+function configMethod(config: any): string {
+    if (config != None && config["method"] != None) {
+        return String(config["method"]).toUpperCase();
+    }
+    return "GET";
+}
+
+function configHeaders(config: any): Map<string, string> {
+    if (config != None && config["headers"] != None) {
+        return copyHeaders(config["headers"] as Map<string, string>);
+    }
+    return createHeaders();
+}
+
+function configInsecureTls(config: any): bool {
+    if (config != None && config["insecureTls"] != None) {
+        return config["insecureTls"] as bool;
+    }
+    if (config != None && config["allowInsecureTls"] != None) {
+        return config["allowInsecureTls"] as bool;
+    }
+    return false;
+}
+
+function configHasJson(config: any): bool {
+    return config != None && config["json"] != None;
+}
+
+function configBody(config: any): string {
+    if (config == None || config["body"] == None) {
+        return "";
+    }
+    return String(config["body"]);
+}
+
+function clientFor(url: string, config: any): HttpClient {
+    if (url.startsWith("https://")) {
+        if (configInsecureTls(config)) {
+            return httpsInsecureClient;
+        }
+        return httpsClient;
+    }
+    return httpClient;
+}
+
+export function fetch(url: string, config: any = None): HttpClientResponse {
+    let method: string = configMethod(config);
+    let headers: Map<string, string> = configHeaders(config);
+    let client: HttpClient = clientFor(url, config);
+
+    if (configHasJson(config)) {
+        let jsonHeaders: Map<string, string> = createJsonHeaders();
+        let customHeaders: Map<string, string> = copyHeaders(headers);
+        let keys: string[] = customHeaders.keys();
+        for (let i: int = 0; i < keys.length(); i++) {
+            let key: string = keys[i];
+            let value: Optional<string> = customHeaders.get(key);
+            if (value != None) {
+                jsonHeaders.set(key, value as string);
+            }
+        }
+        return client.request(method, url, stringify(config["json"]), jsonHeaders);
+    }
+
+    return client.request(method, url, configBody(config), headers);
+}
+
+export function get(url: string): HttpClientResponse {
+    return fetch(url);
+}
+
+export function post(url: string, body: string): HttpClientResponse {
+    return fetch(url, { method: "POST", body: body });
+}
+
+export function put(url: string, body: string): HttpClientResponse {
+    return fetch(url, { method: "PUT", body: body });
+}
+
+export function patch(url: string, body: string): HttpClientResponse {
+    return fetch(url, { method: "PATCH", body: body });
+}
+
+export function deleteRequest(url: string): HttpClientResponse {
+    return fetch(url, { method: "DELETE" });
+}

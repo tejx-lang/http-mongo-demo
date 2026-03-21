@@ -1,0 +1,468 @@
+import { Map } from "std:collections";
+
+function stringValue(value: any, fallback: string = ""): string {
+    if (value == None) {
+        return fallback;
+    }
+    return String(value);
+}
+
+function intValue(value: any, fallback: int = 0): int {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return value as int;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1 : 0;
+    }
+
+    return parseFloat(String(value)) as int;
+}
+
+function int64Value(value: any, fallback: int64 = 0): int64 {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int64") {
+        return value as int64;
+    }
+    if (kind == "int" || kind == "int32") {
+        return (value as int) as int64;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int64;
+    }
+
+    return (parseFloat(String(value)) as int) as int64;
+}
+
+function floatValue(value: any, fallback: float = 0.0): float {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return value as float;
+    }
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return (value as int64) as float;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1.0 : 0.0;
+    }
+
+    return parseFloat(String(value));
+}
+
+function cloneStrings(values: string[]): string[] {
+    let out: string[] = [];
+    for (let i: int = 0; i < values.length(); i++) {
+        out.push(values[i]);
+    }
+    return out;
+}
+
+export class MongoConnectionConfig {
+    uri: string;
+    host: string;
+    port: int;
+    database: string;
+    username: string;
+    password: string;
+    authDatabase: string;
+    replicaSet: string;
+
+    constructor(
+        uri: string,
+        host: string,
+        port: int,
+        database: string,
+        username: string,
+        password: string,
+        authDatabase: string,
+        replicaSet: string
+    ) {
+        this.uri = uri;
+        this.host = host;
+        this.port = port;
+        this.database = database;
+        this.username = username;
+        this.password = password;
+        this.authDatabase = authDatabase;
+        this.replicaSet = replicaSet;
+    }
+}
+
+export class AppMeta {
+    id: string;
+    name: string;
+    version: int;
+    updatedAt: int64;
+    storage: string;
+    database: string;
+
+    constructor(id: string, name: string, version: int, updatedAt: int64, storage: string, database: string) {
+        this.id = id;
+        this.name = name;
+        this.version = version;
+        this.updatedAt = updatedAt;
+        this.storage = storage;
+        this.database = database;
+    }
+}
+
+export class AppUser {
+    id: string;
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+    createdAt: int64;
+
+    constructor(id: string, name: string, email: string, password: string, role: string, createdAt: int64) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.password = password;
+        this.role = role;
+        this.createdAt = createdAt;
+    }
+}
+
+export class PublicUser {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    createdAt: int64;
+
+    constructor(id: string, name: string, email: string, role: string, createdAt: int64) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.role = role;
+        this.createdAt = createdAt;
+    }
+}
+
+export class AppProduct {
+    id: string;
+    name: string;
+    price: float;
+    stock: int;
+    category: string;
+    createdAt: int64;
+
+    constructor(id: string, name: string, price: float, stock: int, category: string, createdAt: int64) {
+        this.id = id;
+        this.name = name;
+        this.price = price;
+        this.stock = stock;
+        this.category = category;
+        this.createdAt = createdAt;
+    }
+}
+
+export class AppOrder {
+    id: string;
+    userId: string;
+    productIds: string[];
+    total: float;
+    status: string;
+    createdAt: int64;
+
+    constructor(id: string, userId: string, productIds: string[], total: float, status: string, createdAt: int64) {
+        this.id = id;
+        this.userId = userId;
+        this.productIds = cloneStrings(productIds);
+        this.total = total;
+        this.status = status;
+        this.createdAt = createdAt;
+    }
+}
+
+export class AppEvent {
+    id: string;
+    action: string;
+    entity: string;
+    entityId: string;
+    createdAt: int64;
+
+    constructor(id: string, action: string, entity: string, entityId: string, createdAt: int64) {
+        this.id = id;
+        this.action = action;
+        this.entity = entity;
+        this.entityId = entityId;
+        this.createdAt = createdAt;
+    }
+}
+
+export class UserPayload {
+    name: Optional<string>;
+    email: Optional<string>;
+    password: Optional<string>;
+    role: Optional<string>;
+
+    constructor() {
+        this.name = None;
+        this.email = None;
+        this.password = None;
+        this.role = None;
+    }
+}
+
+export class ProductPayload {
+    name: Optional<string>;
+    category: Optional<string>;
+    price: Optional<float>;
+    stock: Optional<int>;
+
+    constructor() {
+        this.name = None;
+        this.category = None;
+        this.price = None;
+        this.stock = None;
+    }
+}
+
+export class OrderPayload {
+    userId: Optional<string>;
+    status: Optional<string>;
+    productIds: string[];
+
+    constructor() {
+        this.userId = None;
+        this.status = None;
+        this.productIds = [];
+    }
+}
+
+export class LoginPayload {
+    email: Optional<string>;
+    password: Optional<string>;
+
+    constructor() {
+        this.email = None;
+        this.password = None;
+    }
+}
+
+export class UserCollection {
+    ids: string[];
+    items: Map<string, AppUser>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppUser>();
+    }
+}
+
+export class ProductCollection {
+    ids: string[];
+    items: Map<string, AppProduct>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppProduct>();
+    }
+}
+
+export class OrderCollection {
+    ids: string[];
+    items: Map<string, AppOrder>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppOrder>();
+    }
+}
+
+export class EventCollection {
+    ids: string[];
+    items: Map<string, AppEvent>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppEvent>();
+    }
+}
+
+export class DatabaseSnapshot {
+    meta: AppMeta;
+    users: UserCollection;
+    products: ProductCollection;
+    orders: OrderCollection;
+    events: EventCollection;
+
+    constructor(meta: AppMeta, users: UserCollection, products: ProductCollection, orders: OrderCollection, events: EventCollection) {
+        this.meta = meta;
+        this.users = users;
+        this.products = products;
+        this.orders = orders;
+        this.events = events;
+    }
+}
+
+export function cloneConnectionConfig(connection: MongoConnectionConfig): MongoConnectionConfig {
+    return new MongoConnectionConfig(
+        connection.uri,
+        connection.host,
+        connection.port,
+        connection.database,
+        connection.username,
+        connection.password,
+        connection.authDatabase,
+        connection.replicaSet
+    );
+}
+
+export function metaToDocument(meta: AppMeta): any {
+    return {
+        id: meta.id,
+        name: meta.name,
+        version: meta.version,
+        updatedAt: meta.updatedAt,
+        storage: meta.storage,
+        database: meta.database
+    };
+}
+
+export function userToDocument(user: AppUser): any {
+    return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        password: user.password,
+        role: user.role,
+        createdAt: user.createdAt
+    };
+}
+
+export function productToDocument(product: AppProduct): any {
+    return {
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        stock: product.stock,
+        category: product.category,
+        createdAt: product.createdAt
+    };
+}
+
+export function orderToDocument(order: AppOrder): any {
+    return {
+        id: order.id,
+        userId: order.userId,
+        productIds: cloneStrings(order.productIds),
+        total: order.total,
+        status: order.status,
+        createdAt: order.createdAt
+    };
+}
+
+export function eventToDocument(event: AppEvent): any {
+    return {
+        id: event.id,
+        action: event.action,
+        entity: event.entity,
+        entityId: event.entityId,
+        createdAt: event.createdAt
+    };
+}
+
+export function publicUser(user: AppUser): PublicUser {
+    return new PublicUser(user.id, user.name, user.email, user.role, user.createdAt);
+}
+
+export function metaFromDocument(document: any): AppMeta {
+    return new AppMeta(
+        stringValue(document["id"] != None ? document["id"] : document["_id"], "app-meta"),
+        stringValue(document["name"], "tejx-runtime-state"),
+        intValue(document["version"], 1),
+        int64Value(document["updatedAt"], 0),
+        stringValue(document["storage"], "mongodb"),
+        stringValue(document["database"], "")
+    );
+}
+
+export function userFromDocument(document: any): Optional<AppUser> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    return new AppUser(
+        id,
+        stringValue(document["name"]),
+        stringValue(document["email"]),
+        stringValue(document["password"]),
+        stringValue(document["role"], "customer"),
+        int64Value(document["createdAt"], 0)
+    );
+}
+
+export function productFromDocument(document: any): Optional<AppProduct> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    return new AppProduct(
+        id,
+        stringValue(document["name"]),
+        floatValue(document["price"], 0.0),
+        intValue(document["stock"], 0),
+        stringValue(document["category"], "misc"),
+        int64Value(document["createdAt"], 0)
+    );
+}
+
+export function orderFromDocument(document: any): Optional<AppOrder> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    let productIds: string[] = [];
+    let rawProductIds: any = document["productIds"];
+    if (rawProductIds != None) {
+        let values: any[] = rawProductIds as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            productIds.push(stringValue(values[i]));
+        }
+    }
+
+    return new AppOrder(
+        id,
+        stringValue(document["userId"]),
+        productIds,
+        floatValue(document["total"], 0.0),
+        stringValue(document["status"], "pending"),
+        int64Value(document["createdAt"], 0)
+    );
+}
+
+export function eventFromDocument(document: any): Optional<AppEvent> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    return new AppEvent(
+        id,
+        stringValue(document["action"]),
+        stringValue(document["entity"]),
+        stringValue(document["entityId"]),
+        int64Value(document["createdAt"], 0)
+    );
+}

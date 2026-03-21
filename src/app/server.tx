@@ -1,0 +1,64 @@
+import { stringify } from "std:json";
+import { resolvePort, resolveBaseUrl, resolveMongoConnection, resolveMongoStorageName } from "./config/env.tx";
+import { configureDatabaseConnection } from "./services/database.tx";
+import { MongoConnectionConfig } from "./models/domain.tx";
+import { Request, Response, Server } from "../modules/server/index.tx";
+import { handleRequest } from "./router/index.tx";
+
+let storageName: string = "";
+
+function errorDetail(error: any): string {
+    if (error == None) {
+        return "Unknown error";
+    }
+
+    if (typeof(error) == "string") {
+        return error as string;
+    }
+
+    if (typeof(error) == "object") {
+        if (error["message"] != None) {
+            return String(error["message"]);
+        }
+        if (error["errmsg"] != None) {
+            return String(error["errmsg"]);
+        }
+
+        try {
+            let serialized: string = stringify(error);
+            if (serialized != "{}") {
+                return serialized;
+            }
+        } catch (stringifyError) {
+        }
+
+        return "object keys=" + stringify(Object.keys(error));
+    }
+
+    return String(error);
+}
+
+function appHandler(req: Request): Response {
+    return handleRequest(req, storageName);
+}
+
+export function runApplication(): void {
+    try {
+        let mongoConnection: MongoConnectionConfig = resolveMongoConnection();
+        configureDatabaseConnection(mongoConnection);
+
+        let port: string = resolvePort();
+        let baseUrl: string = resolveBaseUrl(port);
+        storageName = resolveMongoStorageName();
+
+        let server = new Server();
+        print("Starting TejX multi-API server on port ", port);
+        print("Storage: ", storageName);
+        print("Server active at ", baseUrl);
+        print("Try: GET /health, GET /api/users, GET /api/products, GET /api/orders, GET /api/reports/summary");
+        server.listen("127.0.0.1:" + port, appHandler);
+    } catch (error) {
+        print("FATAL ERROR starting server: ", errorDetail(error));
+        exit(1);
+    }
+}

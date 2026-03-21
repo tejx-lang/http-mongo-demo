@@ -1,0 +1,483 @@
+import std:binary;
+import { abs, floor, round, pow, ln } from "std:math";
+
+function bsonTypeDouble(): int { return 1; }
+function bsonTypeString(): int { return 2; }
+function bsonTypeDocument(): int { return 3; }
+function bsonTypeArray(): int { return 4; }
+function bsonTypeBinary(): int { return 5; }
+function bsonTypeObjectId(): int { return 7; }
+function bsonTypeBool(): int { return 8; }
+function bsonTypeDatetime(): int { return 9; }
+function bsonTypeNull(): int { return 10; }
+function bsonTypeInt32(): int { return 16; }
+function bsonTypeTimestamp(): int { return 17; }
+function bsonTypeInt64(): int { return 18; }
+function bsonTypeDecimal128(): int { return 19; }
+
+function ieeeLn2(): float {
+    return 0.6931471805599453;
+}
+
+function ieee2Pow32(): float {
+    return 4294967296.0;
+}
+
+function ieee2Pow52(): float {
+    return 4503599627370496.0;
+}
+
+function isArrayValue(value: any): bool {
+    if (value == None) {
+        return false;
+    }
+    
+    return typeof(value)=="array";
+}
+
+function isIntegerType(kind: string): bool {
+    return kind == "int" || kind == "int32" || kind == "int64";
+}
+
+function isFloatType(kind: string): bool {
+    return kind == "float" || kind == "float32" || kind == "float64" || kind == "number";
+}
+
+function isBinaryValue(value: any): bool {
+    if (value == None || typeof(value) != "object") {
+        return false;
+    }
+    
+    if (value["_bsonType"] != "binary") {
+        return false;
+    }
+    
+    return value["data"] != None;
+}
+
+function withinInt32Range(value: int64): bool {
+    return value >= -2147483648 && value <= 2147483647;
+}
+
+function toFloatValue(value: any): float {
+    return parseFloat(String(value));
+}
+
+function bytesToHex(data: int[]): string {
+    let digits: string = "0123456789abcdef";
+    let out: string = "";
+    
+    for (let i: int = 0; i < data.length(); i++) {
+        let value: int = data[i];
+        let high: int = (value / 16) as int;
+        let low: int = value % 16;
+        out = out + digits.substring(high, high + 1) + digits.substring(low, low + 1);
+    }
+    
+    return out;
+}
+
+export function writeInt64LE(writer: ByteWriter, value: int64): void {
+    let remaining: int64 = value;
+    for (let i: int = 0; i < 8; i++) {
+        writer.writeU8(remaining % 256);
+        remaining = remaining / 256;
+    }
+}
+
+export function readUInt64LE(reader: ByteReader): int64 {
+    let multiplier: int64 = 1;
+    let out: int64 = 0;
+    
+    for (let i: int = 0; i < 8; i++) {
+        out = out + ((reader.readU8() as int64) * multiplier);
+        multiplier = multiplier * 256;
+    }
+    
+    return out;
+}
+
+export function readInt64LE(reader: ByteReader): int64 {
+    return readUInt64LE(reader);
+}
+
+function writeDoubleLE(writer: ByteWriter, value: float): void {
+    if (value == 0.0) {
+        writer.writeU32LE(0);
+        writer.writeU32LE(0);
+        return;
+    }
+    
+    let signBit: int64 = 0;
+    let magnitude: float = value;
+    if (value < 0.0) {
+        signBit = 2147483648;
+        magnitude = abs(value);
+    }
+    
+    let exponent: int = (floor(ln(magnitude) / ieeeLn2())) as int;
+    let normalized: float = magnitude / pow(2.0, toFloatValue(exponent));
+    
+    while (normalized < 1.0) {
+        exponent = exponent - 1;
+        normalized = magnitude / pow(2.0, toFloatValue(exponent));
+    }
+    
+    while (normalized >= 2.0) {
+        exponent = exponent + 1;
+        normalized = magnitude / pow(2.0, toFloatValue(exponent));
+    }
+    
+    let mantissaFloat: float = round((normalized - 1.0) * ieee2Pow52());
+    if (mantissaFloat >= ieee2Pow52()) {
+        mantissaFloat = 0.0;
+        exponent = exponent + 1;
+    }
+    
+    let biasedExponent: int64 = (exponent + 1023) as int64;
+    let mantissa: int64 = mantissaFloat as int64;
+    let highMantissa: int64 = mantissa / 4294967296;
+    let lowMantissa: int64 = mantissa % 4294967296;
+    let highWord: int64 = signBit | (biasedExponent << 20) | highMantissa;
+    
+    writer.writeU32LE(lowMantissa);
+    writer.writeU32LE(highWord);
+}
+
+function readDoubleLE(reader: ByteReader): float {
+    let lowWord: int64 = reader.readU32LE();
+    let highWord: int64 = reader.readU32LE();
+    
+    let sign: float = 1.0;
+    if ((highWord & 2147483648) != 0) {
+        sign = -1.0;
+    }
+    
+    let exponent: int = ((highWord >> 20) & 2047) as int;
+    let mantissaHigh: int64 = highWord & 1048575;
+    let mantissa: float = toFloatValue(mantissaHigh) * ieee2Pow32() + toFloatValue(lowWord);
+    
+    if (exponent == 0) {
+        if (mantissa == 0.0) {
+            return 0.0;
+        }
+        return sign * pow(2.0, -1022.0) * (mantissa / ieee2Pow52());
+    }
+    
+    if (exponent == 2047) {
+        return 0.0;
+    }
+    
+    return sign * pow(2.0, toFloatValue(exponent - 1023)) * (1.0 + (mantissa / ieee2Pow52()));
+}
+
+function encodeStringValue(value: string): int[] {
+    let writer: ByteWriter = binary.writer();
+    writer.writeI32LE(value.length() + 1);
+    writer.writeString(value);
+    writer.writeU8(0);
+    return writer.toBytes();
+}
+
+class BsonEncoder {
+    private documentKeys(value: any): string[] {
+        if (value["_bsonOrder"] != None) {
+            return value["_bsonOrder"] as string[];
+        }
+        return Object.keys(value);
+    }
+    
+    private encodeArrayDocument(values: any[]): int[] {
+        let keys: string[] = [];
+        for (let i: int = 0; i < values.length(); i++) {
+            keys.push(String(i));
+        }
+        return this.encodeElements(keys, values, true);
+    }
+    
+    private encodeDocumentValue(value: any): int[] {
+        let keys: string[] = this.documentKeys(value);
+        let values: any[] = [];
+        for (let i: int = 0; i < keys.length(); i++) {
+            values.push(value[keys[i]]);
+        }
+        return this.encodeElements(keys, values, false);
+    }
+    
+    private encodeElement(key: string, value: any): int[] {
+        let writer: ByteWriter = binary.writer();
+        
+        if (value == None) {
+            writer.writeU8(bsonTypeNull());
+            writer.writeCString(key);
+            return writer.toBytes();
+        }
+        
+        let kind: string = typeof(value);
+        
+        if (isArrayValue(value)) {
+            let arrayBytes: int[] = this.encodeArrayDocument(value as any[]);
+            writer.writeU8(bsonTypeArray());
+            writer.writeCString(key);
+            writer.writeBytes(arrayBytes);
+            return writer.toBytes();
+        }
+        
+        if (kind == "object") {
+            if (isBinaryValue(value)) {
+                let payload: int[] = value["data"] as int[];
+                let subtype: int = 0;
+                if (value["subtype"] != None) {
+                    subtype = value["subtype"] as int;
+                }
+                
+                writer.writeU8(bsonTypeBinary());
+                writer.writeCString(key);
+                writer.writeI32LE(payload.length());
+                writer.writeU8(subtype);
+                writer.writeBytes(payload);
+                return writer.toBytes();
+            }
+            
+            let documentBytes: int[] = this.encodeDocumentValue(value);
+            writer.writeU8(bsonTypeDocument());
+            writer.writeCString(key);
+            writer.writeBytes(documentBytes);
+            return writer.toBytes();
+        }
+        
+        if (kind == "string") {
+            let stringBytes: int[] = encodeStringValue(value as string);
+            writer.writeU8(bsonTypeString());
+            writer.writeCString(key);
+            writer.writeBytes(stringBytes);
+            return writer.toBytes();
+        }
+        
+        if (kind == "bool") {
+            writer.writeU8(bsonTypeBool());
+            writer.writeCString(key);
+            writer.writeU8((value as bool) ? 1 : 0);
+            return writer.toBytes();
+        }
+        
+        if (isIntegerType(kind)) {
+            let integerValue: int64 = value as int64;
+            if (withinInt32Range(integerValue)) {
+                writer.writeU8(bsonTypeInt32());
+                writer.writeCString(key);
+                writer.writeI32LE(integerValue as int);
+            } else {
+                writer.writeU8(bsonTypeInt64());
+                writer.writeCString(key);
+                writeInt64LE(writer, integerValue);
+            }
+            return writer.toBytes();
+        }
+        
+        if (isFloatType(kind)) {
+            writer.writeU8(bsonTypeDouble());
+            writer.writeCString(key);
+            writeDoubleLE(writer, toFloatValue(value));
+            return writer.toBytes();
+        }
+        
+        writer.writeU8(bsonTypeString());
+        writer.writeCString(key);
+        let fallbackBytes: int[] = encodeStringValue(String(value));
+        writer.writeBytes(fallbackBytes);
+        return writer.toBytes();
+    }
+    
+    private encodeElements(keys: string[], values: any[], isArray: bool): int[] {
+        let parts: int[][] = [];
+        
+        for (let i: int = 0; i < keys.length(); i++) {
+            let key: string = keys[i];
+            let value: any = values[i];
+            if (key == "_bsonOrder") {
+                continue;
+            }
+            if (!isArray && (typeof(value) == "function" || value == undefined)) {
+                continue;
+            }
+            parts.push(this.encodeElement(key, value));
+        }
+        
+        parts.push([0]);
+        let body: int[] = binary.concat(parts);
+        let writer: ByteWriter = binary.writer();
+        writer.writeI32LE(body.length() + 4);
+        writer.writeBytes(body);
+        return writer.toBytes();
+    }
+    
+    encodeDocument(doc: any): int[] {
+        let keys: string[] = this.documentKeys(doc);
+        let values: any[] = [];
+        for (let i: int = 0; i < keys.length(); i++) {
+            values.push(doc[keys[i]]);
+        }
+        return this.encodeElements(keys, values, false);
+    }
+    
+    encodeDocumentWithKeys(doc: any, keys: string[]): int[] {
+        let values: any[] = [];
+        for (let i: int = 0; i < keys.length(); i++) {
+            values.push(doc[keys[i]]);
+        }
+        return this.encodeElements(keys, values, false);
+    }
+}
+
+export function encodeDocument(doc: any): int[] {
+    let encoder = new BsonEncoder();
+    return encoder.encodeDocument(doc);
+}
+
+export function encodeDocumentWithKeys(doc: any, keys: string[]): int[] {
+    let encoder = new BsonEncoder();
+    return encoder.encodeDocumentWithKeys(doc, keys);
+}
+
+export function bsonBinary(data: int[], subtype: int = 0): any {
+    return {
+        "_bsonType": "binary",
+        subtype: subtype,
+        data: data
+    };
+}
+
+function decodeArray(reader: ByteReader): any[] {
+    let doc: any = decodeDocumentFromReader(reader);
+    let out: any[] = [];
+    let keys: string[] = Object.keys(doc);
+    
+    for (let i: int = 0; i < keys.length(); i++) {
+        let key: string = String(i);
+        if (doc[key] != None || key == "0") {
+            out.push(doc[key]);
+        }
+    }
+    
+    return out;
+}
+
+function decodeValue(reader: ByteReader, valueType: int): any {
+    if (valueType == bsonTypeDouble()) {
+        return readDoubleLE(reader);
+    }
+    
+    if (valueType == bsonTypeString()) {
+        let length: int = reader.readI32LE();
+        let text: string = reader.readString(length - 1);
+        reader.readU8();
+        return text;
+    }
+    
+    if (valueType == bsonTypeDocument()) {
+        return decodeDocumentFromReader(reader);
+    }
+    
+    if (valueType == bsonTypeArray()) {
+        return decodeArray(reader);
+    }
+    
+    if (valueType == bsonTypeBinary()) {
+        let length: int = reader.readI32LE();
+        let subtype: int = reader.readU8();
+        let data: int[] = reader.readBytes(length);
+        return bsonBinary(data, subtype);
+    }
+    
+    if (valueType == bsonTypeObjectId()) {
+        return bytesToHex(reader.readBytes(12));
+    }
+    
+    if (valueType == bsonTypeBool()) {
+        return reader.readU8() != 0;
+    }
+    
+    if (valueType == bsonTypeDatetime()) {
+        return readInt64LE(reader);
+    }
+    
+    if (valueType == bsonTypeNull()) {
+        return None;
+    }
+    
+    if (valueType == bsonTypeInt32()) {
+        return reader.readI32LE();
+    }
+    
+    if (valueType == bsonTypeTimestamp()) {
+        let increment: int64 = reader.readU32LE();
+        let seconds: int64 = reader.readU32LE();
+        return {
+            increment: increment as int,
+            seconds: seconds as int
+        };
+    }
+    
+    if (valueType == bsonTypeInt64()) {
+        return readInt64LE(reader);
+    }
+    
+    if (valueType == bsonTypeDecimal128()) {
+        return bytesToHex(reader.readBytes(16));
+    }
+    
+    throw new Error("Unsupported BSON value type " + String(valueType));
+}
+
+export function decodeDocumentFromReader(reader: ByteReader): any {
+    let length: int = reader.readI32LE();
+    let endPosition: int = reader.position() + length - 5;
+    let out: any = {};
+    
+    while (reader.position() <= endPosition) {
+        let valueType: int = reader.readU8();
+        if (valueType == 0) {
+            return out;
+        }
+        
+        let key: string = reader.readCString();
+        out[key] = decodeValue(reader, valueType);
+    }
+    
+    let terminator: int = reader.readU8();
+    if (terminator != 0) {
+        throw new Error("Invalid BSON document terminator");
+    }
+    
+    return out;
+}
+
+export function decodeDocument(data: int[]): any {
+    let reader = binary.reader(data);
+    return decodeDocumentFromReader(reader);
+}
+
+export function documentKeysInOrder(data: int[]): string[] {
+    let reader = binary.reader(data);
+    let length: int = reader.readI32LE();
+    let endPosition: int = reader.position() + length - 5;
+    let keys: string[] = [];
+    
+    while (reader.position() <= endPosition) {
+        let valueType: int = reader.readU8();
+        if (valueType == 0) {
+            return keys;
+        }
+        
+        let key: string = reader.readCString();
+        keys.push(key);
+        decodeValue(reader, valueType);
+    }
+    
+    if (reader.readU8() != 0) {
+        throw new Error("Invalid BSON document terminator");
+    }
+    
+    return keys;
+}

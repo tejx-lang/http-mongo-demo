@@ -1,0 +1,25 @@
+import { stringify } from "std:json";
+
+function main() {
+    let bare = [{ id: "a", name: "Bare" }];
+    let quoted = [{ "id": "b", "name": "Quoted" }];
+    let bag = {
+        first: { id: "x", name: "First" },
+        second: { id: "y", name: "Second" }
+    };
+    let wrapped = {
+        meta: { id: "m1", name: "Meta" },
+        list1: bare,
+        list2: quoted,
+        bag: bag
+    };
+
+    print("bare_keys=", Object.keys(bare[0]).length());
+    print("quoted_keys=", Object.keys(quoted[0]).length());
+    print("bare_entries=", Object.entries(bare[0]).length());
+    print("quoted_entries=", Object.entries(quoted[0]).length());
+    print("bare=", stringify(bare));
+    print("quoted=", stringify(quoted));
+    print("bag=", stringify(bag));
+    print("wrapped=", stringify(wrapped));
+}

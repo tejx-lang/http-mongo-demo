@@ -1,0 +1,92 @@
+import { Response, createJsonResponse } from "../../modules/server/index.tx";
+import { AppOrder, AppProduct, DatabaseSnapshot, EventCollection, OrderCollection, ProductCollection } from "../models/domain.tx";
+
+function jsonError(message: string, status: int): Response {
+    return createJsonResponse({ error: message }, status);
+}
+
+function getOrder(orders: OrderCollection, id: string): Optional<AppOrder> {
+    return orders.items.get(id);
+}
+
+function getProduct(products: ProductCollection, id: string): Optional<AppProduct> {
+    return products.items.get(id);
+}
+
+function databaseSummary(db: DatabaseSnapshot): any {
+    let revenue: float = 0.0;
+    let lowStockIds: string[] = [];
+    let lowStockItems: any = {};
+
+    for (let i: int = 0; i < db.orders.ids.length(); i++) {
+        let orderId: string = db.orders.ids[i];
+        let orderValue: Optional<AppOrder> = getOrder(db.orders, orderId);
+        if (orderValue != None) {
+            revenue = revenue + (orderValue as AppOrder).total;
+        }
+    }
+
+    for (let i: int = 0; i < db.products.ids.length(); i++) {
+        let productId: string = db.products.ids[i];
+        let productValue: Optional<AppProduct> = getProduct(db.products, productId);
+        if (productValue == None) {
+            continue;
+        }
+
+        let product: AppProduct = productValue as AppProduct;
+        if (product.stock < 10) {
+            lowStockIds.push(productId);
+            lowStockItems[productId] = product;
+        }
+    }
+
+    return {
+        users: db.users.ids.length(),
+        products: db.products.ids.length(),
+        orders: db.orders.ids.length(),
+        events: db.events.ids.length(),
+        revenue: revenue,
+        lowStock: {
+            count: lowStockIds.length(),
+            ids: lowStockIds,
+            items: lowStockItems
+        }
+    };
+}
+
+function eventsPayload(events: EventCollection): any {
+    let items: any = {};
+    for (let i: int = 0; i < events.ids.length(); i++) {
+        let eventId: string = events.ids[i];
+        let eventValue = events.items.get(eventId);
+        if (eventValue != None) {
+            items[eventId] = eventValue;
+        }
+    }
+
+    return {
+        count: events.ids.length(),
+        ids: events.ids,
+        items: items
+    };
+}
+
+export function handleSummary(method: string, storageName: string, db: DatabaseSnapshot): Response {
+    if (method != "GET") {
+        return jsonError("Method not allowed", 405);
+    }
+
+    return createJsonResponse({
+        database: db.meta,
+        summary: databaseSummary(db),
+        storage: storageName
+    }, 200);
+}
+
+export function handleEvents(method: string, db: DatabaseSnapshot): Response {
+    if (method != "GET") {
+        return jsonError("Method not allowed", 405);
+    }
+
+    return createJsonResponse(eventsPayload(db.events), 200);
+}

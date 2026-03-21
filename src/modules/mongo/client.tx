@@ -1,0 +1,566 @@
+import std:net;
+import std:binary;
+import { buildScramContinue, buildScramStart, binaryPayloadToText, generateScramNonce, validateScramFinal } from "./auth.tx";
+import { decodeDocumentFromReader, encodeDocument, encodeDocumentWithKeys, bsonBinary } from "./bson.tx";
+import { MongoConnectionConfig } from "../../app/models/domain.tx";
+
+function mongoOpMsg(): int {
+    return 2013;
+}
+
+function mongoSectionBody(): int {
+    return 0;
+}
+
+function mongoSectionSequence(): int {
+    return 1;
+}
+
+let mongoRuntimePrimed: int64 = 0;
+
+function okValue(result: any): bool {
+    let ok: any = result["ok"];
+    if (ok == None) {
+        return true;
+    }
+
+    let kind: string = typeof(ok);
+    if (kind == "bool") {
+        return ok as bool;
+    }
+
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return (ok as int64) != 0;
+    }
+
+    return (ok as float) >= 1.0;
+}
+
+function boolValue(value: any, fallback: bool = false): bool {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "bool") {
+        return value as bool;
+    }
+
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return (value as int64) != 0;
+    }
+
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) != 0.0;
+    }
+
+    if (kind == "string") {
+        return (value as string) != "";
+    }
+
+    return fallback;
+}
+
+function commandError(result: any): string {
+    if (result["errmsg"] != None) {
+        return result["errmsg"] as string;
+    }
+    if (result["codeName"] != None) {
+        return result["codeName"] as string;
+    }
+    return "Unknown MongoDB command error";
+}
+
+function withDatabase(command: any, database: string): any {
+    let enriched: any = {};
+    let orderedKeys: string[] = [];
+    let keys: string[] = command["_bsonOrder"] != None ? (command["_bsonOrder"] as string[]) : Object.keys(command);
+    for (let i: int = 0; i < keys.length(); i++) {
+        let key: string = keys[i];
+        if (key == "_bsonOrder") {
+            continue;
+        }
+        enriched[key] = command[key];
+        orderedKeys.push(key);
+    }
+    enriched["$db"] = database;
+    orderedKeys.push("$db");
+    enriched["_bsonOrder"] = orderedKeys;
+    return enriched;
+}
+
+function withDocumentId(document: any): any {
+    let cloned: any = {};
+    let keys: string[] = Object.keys(document);
+    for (let i: int = 0; i < keys.length(); i++) {
+        let key: string = keys[i];
+        cloned[key] = document[key];
+    }
+
+    if (cloned["_id"] == None && cloned["id"] != None) {
+        cloned["_id"] = cloned["id"];
+    }
+
+    return cloned;
+}
+
+function stableText(text: string): string {
+    return binary.toString(binary.fromString(text));
+}
+
+function readRawMessage(stream: TcpStream): any {
+    let headerBytes: Optional<int[]> = stream.readExactBytes(16);
+    if (headerBytes == None) {
+        throw new Error("MongoDB did not return a message header");
+    }
+
+    let headerReader: ByteReader = binary.reader(headerBytes as int[]);
+    let messageLength: int = headerReader.readI32LE();
+    headerReader.readI32LE();
+    headerReader.readI32LE();
+    let opCode: int = headerReader.readI32LE();
+    if (opCode != mongoOpMsg()) {
+        throw new Error("Unexpected MongoDB opcode " + String(opCode));
+    }
+
+    let payloadBytes: Optional<int[]> = stream.readExactBytes(messageLength - 16);
+    if (payloadBytes == None) {
+        throw new Error("MongoDB response payload was truncated");
+    }
+
+    let payloadReader: ByteReader = binary.reader(payloadBytes as int[]);
+    payloadReader.readI32LE();
+    let sectionKind: int = payloadReader.readU8();
+    if (sectionKind != mongoSectionBody()) {
+        throw new Error("Unsupported MongoDB section kind " + String(sectionKind));
+    }
+
+    return decodeDocumentFromReader(payloadReader);
+}
+
+function sendRawCommand(host: string, port: int, requestId: int, command: any): void {
+    let maybeStream: Optional<TcpStream> = net.connectHost(host, port);
+    if (maybeStream == None) {
+        throw new Error("Failed to connect to MongoDB at " + host + ":" + String(port));
+    }
+    let stream: TcpStream = maybeStream as TcpStream;
+    stream.setTimeout(30000);
+
+    let bodyDocument: int[] = encodeDocument(command);
+    let payloadWriter: ByteWriter = binary.writer();
+    payloadWriter.writeI32LE(0);
+    payloadWriter.writeU8(mongoSectionBody());
+    payloadWriter.writeBytes(bodyDocument);
+    let payload: int[] = payloadWriter.toBytes();
+
+    let headerWriter: ByteWriter = binary.writer();
+    headerWriter.writeI32LE(payload.length() + 16);
+    headerWriter.writeI32LE(requestId);
+    headerWriter.writeI32LE(0);
+    headerWriter.writeI32LE(mongoOpMsg());
+    let packet: int[] = binary.concat([headerWriter.toBytes(), payload]);
+
+    if (!stream.writeBytes(packet)) {
+        safeClose(stream);
+        throw new Error("Failed to write MongoDB command to " + host + ":" + String(port));
+    }
+
+    readRawMessage(stream);
+    safeClose(stream);
+}
+
+export function primeMongoConnection(connection: MongoConnectionConfig): void {
+    let host: string = stableText(connection.host);
+    let port: int = connection.port;
+    let database: string = stableText(connection.database);
+
+    sendRawCommand(host, port, 1, {
+        ping: 1,
+        "$db": database
+    });
+
+    try {
+        sendRawCommand(host, port, 2, {
+            find: "app_meta",
+            filter: { "_id": "app-meta" },
+            limit: 1,
+            singleBatch: true,
+            "$db": database
+        });
+    } catch (primeError) {
+    }
+}
+
+function safeClose(stream: TcpStream): void {
+    try {
+        stream.close();
+    } catch (closeError) {
+    }
+}
+
+export class MongoClient {
+    private host: string;
+    private port: int;
+    private databaseNameValue: string;
+    private username: string;
+    private password: string;
+    private authDatabaseName: string;
+    private requestId: int;
+    private streamState: Optional<TcpStream>;
+    private streamOpen: bool;
+
+    constructor(connection: MongoConnectionConfig) {
+        this.host = stableText(connection.host);
+        this.port = connection.port;
+        this.databaseNameValue = stableText(connection.database);
+        this.username = connection.username != "" ? stableText(connection.username) : "";
+        this.password = connection.password != "" ? stableText(connection.password) : "";
+        this.authDatabaseName = connection.authDatabase != "" ? stableText(connection.authDatabase) : "";
+        if (this.authDatabaseName == "" && this.username != "") {
+            this.authDatabaseName = this.databaseNameValue != "" ? stableText(this.databaseNameValue) : "admin";
+        }
+        this.requestId = 1;
+        this.streamState = None;
+        this.streamOpen = false;
+    }
+
+    databaseName(): string {
+        return stableText(this.databaseNameValue);
+    }
+
+    address(): string {
+        return this.host + ":" + String(this.port);
+    }
+
+    private needsAuthentication(): bool {
+        return this.username != "";
+    }
+
+    private nextRequestId(): int {
+        let current: int = this.requestId;
+        this.requestId = this.requestId + 1;
+        return current;
+    }
+
+    private connect(): TcpStream {
+        let maybeStream: Optional<TcpStream> = net.connectHost(this.host, this.port);
+        if (maybeStream == None) {
+            throw new Error("Failed to connect to MongoDB at " + this.address());
+        }
+        let stream: TcpStream = maybeStream as TcpStream;
+        stream.setTimeout(30000);
+        return stream;
+    }
+
+    private openStream(): TcpStream {
+        if (this.streamOpen) {
+            return this.streamState as TcpStream;
+        }
+
+        this.requestId = 1;
+        let stream: TcpStream = this.connect();
+        this.authenticateStream(stream);
+        this.streamState = stream;
+        this.streamOpen = true;
+        return stream;
+    }
+
+    private primeRuntime(): void {
+        if (mongoRuntimePrimed != 0) {
+            return;
+        }
+
+        primeMongoConnection(new MongoConnectionConfig(
+            "",
+            this.host,
+            this.port,
+            this.databaseNameValue,
+            "",
+            "",
+            "",
+            ""
+        ));
+        mongoRuntimePrimed = 1;
+    }
+
+    private readMessage(stream: TcpStream): any {
+        let headerBytes: Optional<int[]> = stream.readExactBytes(16);
+        if (headerBytes == None) {
+            throw new Error("MongoDB did not return a message header");
+        }
+
+        let headerReader: ByteReader = binary.reader(headerBytes as int[]);
+        let messageLength: int = headerReader.readI32LE();
+        let responseId: int = headerReader.readI32LE();
+        let responseTo: int = headerReader.readI32LE();
+        let opCode: int = headerReader.readI32LE();
+
+        if (opCode != mongoOpMsg()) {
+            throw new Error("Unexpected MongoDB opcode " + String(opCode));
+        }
+
+        let remainingLength: int = messageLength - 16;
+        let payloadBytes: Optional<int[]> = stream.readExactBytes(remainingLength);
+        if (payloadBytes == None) {
+            throw new Error("MongoDB response payload was truncated");
+        }
+
+        let payloadReader: ByteReader = binary.reader(payloadBytes as int[]);
+        let flagBits: int = payloadReader.readI32LE();
+        let sectionKind: int = payloadReader.readU8();
+        if (sectionKind != mongoSectionBody()) {
+            throw new Error("Unsupported MongoDB section kind " + String(sectionKind));
+        }
+
+        let document: any = decodeDocumentFromReader(payloadReader);
+        document["_responseId"] = responseId;
+        document["_responseTo"] = responseTo;
+        document["_flags"] = flagBits;
+        return document;
+    }
+
+    private sendCommandOnStream(stream: TcpStream, command: any, database: string): any {
+        let commandBody: any = withDatabase(command, database);
+        return this.sendPayloadOnStream(stream, commandBody, None, None);
+    }
+
+    private sendPayloadOnStream(
+        stream: TcpStream,
+        commandBody: any,
+        sequenceName: any,
+        sequenceDocuments: any
+    ): any {
+        let requestId: int = this.nextRequestId();
+        let bodyDocument: int[] = commandBody["_bsonOrder"] != None
+            ? encodeDocumentWithKeys(commandBody, commandBody["_bsonOrder"] as string[])
+            : encodeDocument(commandBody);
+
+        let payloadWriter: ByteWriter = binary.writer();
+        payloadWriter.writeI32LE(0);
+        payloadWriter.writeU8(mongoSectionBody());
+        payloadWriter.writeBytes(bodyDocument);
+
+        if (sequenceName != None && sequenceDocuments != None) {
+            let docs: any[] = sequenceDocuments as any[];
+            let sequenceWriter: ByteWriter = binary.writer();
+            sequenceWriter.writeCString(sequenceName as string);
+            for (let i: int = 0; i < docs.length(); i++) {
+                sequenceWriter.writeBytes(encodeDocument(docs[i]));
+            }
+
+            let sequenceBytes: int[] = sequenceWriter.toBytes();
+            payloadWriter.writeU8(mongoSectionSequence());
+            payloadWriter.writeI32LE(sequenceBytes.length() + 4);
+            payloadWriter.writeBytes(sequenceBytes);
+        }
+
+        let payload: int[] = payloadWriter.toBytes();
+
+        let headerWriter: ByteWriter = binary.writer();
+        headerWriter.writeI32LE(payload.length() + 16);
+        headerWriter.writeI32LE(requestId);
+        headerWriter.writeI32LE(0);
+        headerWriter.writeI32LE(mongoOpMsg());
+        let packet: int[] = binary.concat([headerWriter.toBytes(), payload]);
+
+        if (!stream.writeBytes(packet)) {
+            throw new Error("Failed to write MongoDB command to " + this.address());
+        }
+
+        let response: any = this.readMessage(stream);
+        if (!okValue(response)) {
+            throw commandError(response);
+        }
+
+        return response;
+    }
+
+    private authenticateStream(stream: TcpStream): void {
+        if (!this.needsAuthentication()) {
+            return;
+        }
+
+        let databaseName: string = stableText(this.databaseNameValue);
+        let username: string = stableText(this.username);
+        let password: string = stableText(this.password);
+        let authDatabase: string = this.authDatabaseName != "" ? stableText(this.authDatabaseName) : "admin";
+
+        if (password == "") {
+            throw new Error("MongoDB password is required when a username is configured");
+        }
+
+        let nonce: string = generateScramNonce(username + ":" + this.address() + ":" + String(this.requestId));
+        let start: any = buildScramStart(username, nonce);
+        let startResponse: any = this.sendCommandOnStream(stream, {
+            saslStart: 1,
+            mechanism: "SCRAM-SHA-256",
+            payload: bsonBinary(binary.fromString(start["message"] as string)),
+            autoAuthorize: 1,
+            options: {
+                skipEmptyExchange: true
+            }
+        }, authDatabase);
+
+        let conversationId: int = startResponse["conversationId"] as int;
+        let serverFirstMessage: string = binaryPayloadToText(startResponse["payload"]);
+        let next: any = buildScramContinue(
+            username,
+            password,
+            start["clientFirstBare"] as string,
+            serverFirstMessage
+        );
+
+        let continueResponse: any = this.sendCommandOnStream(stream, {
+            saslContinue: 1,
+            conversationId: conversationId,
+            payload: bsonBinary(binary.fromString(next["message"] as string))
+        }, authDatabase);
+
+        validateScramFinal(binaryPayloadToText(continueResponse["payload"]), next["serverSignature"] as string);
+        if (!boolValue(continueResponse["done"], false)) {
+            let finalResponse: any = this.sendCommandOnStream(stream, {
+                saslContinue: 1,
+                conversationId: conversationId,
+                payload: bsonBinary([])
+            }, authDatabase);
+
+            let finalMessage: string = binaryPayloadToText(finalResponse["payload"]);
+            if (finalMessage != "") {
+                validateScramFinal(finalMessage, next["serverSignature"] as string);
+            }
+
+            if (!boolValue(finalResponse["done"], false)) {
+                throw new Error("MongoDB authentication conversation did not complete");
+            }
+        }
+
+        // The SCRAM path stresses the runtime heavily; restore the stable field copies
+        // so later commands keep their configured database/auth values.
+        this.databaseNameValue = databaseName;
+        this.username = username;
+        this.password = password;
+        this.authDatabaseName = authDatabase;
+    }
+
+    private runCommand(command: any, database: string): any {
+        try {
+            let stream: TcpStream = this.openStream();
+            let response: any = this.sendCommandOnStream(stream, command, database);
+            return response;
+        } catch (error) {
+            if (this.streamOpen) {
+                safeClose(this.streamState as TcpStream);
+                this.streamState = None;
+                this.streamOpen = false;
+            }
+            throw error;
+        }
+    }
+
+    private runCommandWithSequence(command: any, database: string, sequenceName: string, sequenceDocuments: any[]): any {
+        let commandBody: any = withDatabase(command, database);
+
+        try {
+            let stream: TcpStream = this.openStream();
+            let response: any = this.sendPayloadOnStream(stream, commandBody, sequenceName, sequenceDocuments);
+            return response;
+        } catch (error) {
+            if (this.streamOpen) {
+                safeClose(this.streamState as TcpStream);
+                this.streamState = None;
+                this.streamOpen = false;
+            }
+            throw error;
+        }
+    }
+
+    command(command: any): any {
+        return this.runCommand(command, stableText(this.databaseNameValue));
+    }
+
+    commandOnDatabase(command: any, database: string): any {
+        return this.runCommand(command, stableText(database));
+    }
+
+    ping(): void {
+        this.command({ ping: 1 });
+    }
+
+    find(collection: string, filter: any): any[] {
+        let response: any = this.command({
+            find: collection,
+            filter: filter
+        });
+
+        let cursor: any = response["cursor"];
+        if (cursor == None || cursor["firstBatch"] == None) {
+            return [];
+        }
+
+        return cursor["firstBatch"] as any[];
+    }
+
+    findOne(collection: string, filter: any): any {
+        let response: any = this.command({
+            find: collection,
+            filter: filter,
+            limit: 1,
+            singleBatch: true
+        });
+
+        let cursor: any = response["cursor"];
+        if (cursor == None || cursor["firstBatch"] == None) {
+            return None;
+        }
+
+        let docs: any[] = cursor["firstBatch"] as any[];
+        if (docs.length() == 0) {
+            return None;
+        }
+
+        return docs[0];
+    }
+
+    insertOne(collection: string, document: any): any {
+        return this.runCommandWithSequence({
+            insert: collection
+        }, stableText(this.databaseNameValue), "documents", [withDocumentId(document)]);
+    }
+
+    updateOne(collection: string, filter: any, setFields: any): any {
+        return this.runCommandWithSequence({
+            update: collection
+        }, stableText(this.databaseNameValue), "updates", [{
+            q: filter,
+            u: { "$set": setFields },
+            upsert: false
+        }]);
+    }
+
+    upsertOne(collection: string, filter: any, setFields: any): any {
+        return this.runCommandWithSequence({
+            update: collection
+        }, stableText(this.databaseNameValue), "updates", [{
+            q: filter,
+            u: { "$set": setFields },
+            upsert: true
+        }]);
+    }
+
+    deleteOne(collection: string, filter: any): any {
+        return this.runCommandWithSequence({
+            delete: collection
+        }, stableText(this.databaseNameValue), "deletes", [{
+            q: filter,
+            limit: 1
+        }]);
+    }
+
+    close(): void {
+        if (this.streamOpen) {
+            safeClose(this.streamState as TcpStream);
+            this.streamState = None;
+            this.streamOpen = false;
+        }
+    }
+}

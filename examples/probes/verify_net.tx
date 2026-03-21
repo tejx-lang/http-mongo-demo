@@ -1,0 +1,12 @@
+import std:net;
+
+function main() {
+    print("Checking for TcpListener...");
+    let listener = net.listen("127.0.0.1:9999");
+    if (listener != None) {
+        print("Success: TcpListener created!");
+        net.close(listener);
+    } else {
+        print("Error: Failed to create TcpListener");
+    }
+}

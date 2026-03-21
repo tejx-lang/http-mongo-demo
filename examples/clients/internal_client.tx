@@ -1,0 +1,79 @@
+import { stringify } from "std:json";
+import { getEnv } from "std:system";
+import { nowMs } from "std:time";
+import { fetch } from "../../src/modules/http/index.tx";
+import { HttpClientResponse } from "../../src/modules/http/client.tx";
+
+function resolveBaseUrl(): string {
+    let baseUrl = getEnv("APP_BASE_URL");
+    if (baseUrl != "") {
+        return baseUrl;
+    }
+    return "http://127.0.0.1:3000";
+}
+
+function printResponse(label: string, response: HttpClientResponse): void {
+    print(label);
+    print("Status: ", response.status);
+    print(response.body);
+}
+
+function main() {
+    let baseUrl: string = resolveBaseUrl();
+    let suffix: string = String(nowMs());
+    let email: string = "demo-" + suffix;
+    let password: string = "demo123";
+
+    let health: HttpClientResponse = fetch(baseUrl + "/health");
+    let createUser: HttpClientResponse = fetch(baseUrl + "/api/users", {
+        method: "POST",
+        body: stringify({
+        name: "Demo User " + suffix,
+        email: email,
+        password: password,
+        role: "customer"
+    })});
+    let createKeyboard: HttpClientResponse = fetch(baseUrl + "/api/products", {
+        method: "POST",
+        body: stringify({
+        name: "Keyboard " + suffix,
+        price: 99.99,
+        stock: 15,
+        category: "accessories"
+    })});
+    let createMouse: HttpClientResponse = fetch(baseUrl + "/api/products", {
+        method: "POST",
+        body: stringify({
+        name: "Mouse " + suffix,
+        price: 49.5,
+        stock: 22,
+        category: "accessories"
+    })});
+
+    let userData: any = createUser.json();
+    let keyboardData: any = createKeyboard.json();
+    let mouseData: any = createMouse.json();
+
+    let login: HttpClientResponse = fetch(baseUrl + "/api/auth/login", {
+        method: "POST",
+        body: stringify({
+        email: email,
+        password: password
+    })});
+    let order: HttpClientResponse = fetch(baseUrl + "/api/orders", {
+        method: "POST",
+        body: stringify({
+        userId: userData["id"],
+        productIds: [keyboardData["id"], mouseData["id"]]
+    })});
+    let summary: HttpClientResponse = fetch(baseUrl + "/api/reports/summary");
+
+    print("Internal API client using ", baseUrl);
+    printResponse("GET /health", health);
+    printResponse("POST /api/users", createUser);
+    printResponse("POST /api/products (keyboard)", createKeyboard);
+    printResponse("POST /api/products (mouse)", createMouse);
+    printResponse("POST /api/auth/login", login);
+    printResponse("POST /api/orders", order);
+    printResponse("GET /api/reports/summary", summary);
+}

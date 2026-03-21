@@ -1,0 +1,90 @@
+import { Request, Response, createJsonResponse, stableMethod, stablePath, stableBody } from "../../modules/server/index.tx";
+import { loadDatabase } from "../services/database.tx";
+import { DatabaseSnapshot } from "../models/domain.tx";
+import { handleUsersCollection, handleUserItem } from "../controllers/userController.tx";
+import { handleProductsCollection, handleProductItem } from "../controllers/productController.tx";
+import { handleOrdersCollection, handleOrderItem } from "../controllers/orderController.tx";
+import { handleLogin } from "../controllers/authController.tx";
+import { handleSummary, handleEvents } from "../controllers/reportController.tx";
+
+function jsonError(message: string, status: int): Response {
+    return createJsonResponse({ error: message }, status);
+}
+
+function extractId(path: string, prefix: string): string {
+    return path.substring(prefix.length(), path.length());
+}
+
+export function handleRequest(req: Request, storageName: string): Response {
+    let method: string = stableMethod(req);
+    let path: string = stablePath(req);
+    let body: string = stableBody(req);
+
+    if (path == "/" || path == "") {
+        return createJsonResponse({
+            message: "Welcome to TejX REST API",
+            version: "1.0.0",
+            endpoints: [
+                "/health",
+                "/api/auth/login",
+                "/api/users",
+                "/api/products",
+                "/api/orders",
+                "/api/reports/summary",
+                "/api/events"
+            ]
+        }, 200);
+    }
+
+    let db: DatabaseSnapshot = loadDatabase();
+
+    if (path == "/health") {
+        return handleSummary(method, storageName, db);
+    }
+
+    if (path == "/api/auth/login") {
+        return handleLogin(method, body, db);
+    }
+
+    if (path == "/api/users" || path == "/api/users/") {
+        return handleUsersCollection(method, body, db);
+    }
+
+    if (path.startsWith("/api/users/")) {
+        let userId: string = extractId(path, "/api/users/");
+        return handleUserItem(method, body, db, userId);
+    }
+
+    if (path == "/api/products" || path == "/api/products/") {
+        return handleProductsCollection(method, body, db);
+    }
+
+    if (path.startsWith("/api/products/")) {
+        let productId: string = extractId(path, "/api/products/");
+        return handleProductItem(method, body, db, productId);
+    }
+
+    if (path == "/api/orders" || path == "/api/orders/") {
+        return handleOrdersCollection(method, body, db);
+    }
+
+    if (path.startsWith("/api/orders/")) {
+        let orderId: string = extractId(path, "/api/orders/");
+        return handleOrderItem(method, body, db, orderId);
+    }
+
+    if (path == "/api/reports/summary") {
+        return handleSummary(method, storageName, db);
+    }
+
+    if (path == "/api/events") {
+        return handleEvents(method, db);
+    }
+
+    if (path.startsWith("/api/search")) {
+        // Implement search in a separate controller or here
+        return jsonError("Search not implemented in this version", 501);
+    }
+
+    return jsonError("Route not found", 404);
+}

@@ -1,0 +1,30 @@
+import { resolveMongoConnection } from "../../src/app/config/env.tx";
+import { configureDatabaseConnection, ensureDatabase, loadDatabase } from "../../src/app/services/database.tx";
+import { DatabaseSnapshot, MongoConnectionConfig } from "../../src/app/models/domain.tx";
+
+function main() {
+    let connection: MongoConnectionConfig = resolveMongoConnection();
+
+    configureDatabaseConnection(connection);
+
+    print("resolved_host=", connection.host);
+    print("resolved_port=", connection.port);
+    print("resolved_database=", connection.database);
+    print("resolved_username=", connection.username);
+    print("resolved_auth_database=", connection.authDatabase);
+
+    try {
+        print("probe_step=ensure_db");
+        ensureDatabase();
+        print("probe_step=load_db");
+        let db: DatabaseSnapshot = loadDatabase();
+        print("probe_meta_name=", db.meta.name);
+        print("probe_users_count=", db.users.ids.length());
+        print("probe_products_count=", db.products.ids.length());
+        print("mongo_probe=ok");
+    } catch (error) {
+        print("mongo_probe_error=", error);
+        print("mongo_probe_error_text=", String(error));
+        exit(1);
+    }
+}

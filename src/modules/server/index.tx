@@ -1,0 +1,378 @@
+import std:net;
+import std:binary;
+import { stringify } from "std:json";
+import { Map } from "std:collections";
+
+function parseDecimalInt(text: string): int {
+    let digits: string = "0123456789";
+    let normalized: string = text.trim();
+    let result: int = 0;
+
+    for (let i: int = 0; i < normalized.length(); i++) {
+        let digit: string = normalized.substring(i, i + 1);
+        let value: int = digits.indexOf(digit);
+        if (value < 0) {
+            return 0;
+        }
+        result = (result * 10) + value;
+    }
+
+    return result;
+}
+
+function parseQueryValue(query: string, name: string): string {
+    if (query == "") {
+        return "";
+    }
+
+    let pairs: string[] = query.split("&");
+    for (let i: int = 0; i < pairs.length(); i++) {
+        let pair: string[] = pairs[i].split("=");
+        if (pair.length() >= 1 && pair[0] == name) {
+            if (pair.length() >= 2) {
+                return pair[1];
+            }
+            return "";
+        }
+    }
+
+    return "";
+}
+
+function stableText(text: string): string {
+    return binary.toString(binary.fromString(text.trim()));
+}
+
+function stableCopy(text: string): string {
+    return binary.toString(binary.fromString(text));
+}
+
+function parseHeaderLines(lines: string[], startIndex: int): Map<string, string> {
+    let headers = new Map<string, string>();
+    let i: int = startIndex;
+    while (i < lines.length() && lines[i] != "") {
+        let headerLine: string = lines[i];
+        let separatorIndex: int = headerLine.indexOf(":");
+        if (separatorIndex > 0) {
+            let key: string = headerLine.substring(0, separatorIndex).trim().toLowerCase();
+            let value: string = headerLine.substring(separatorIndex + 1, headerLine.length()).trim();
+            headers.set(key, value);
+        }
+        i++;
+    }
+    return headers;
+}
+
+function headerValue(headers: Map<string, string>, name: string): string {
+    let value: Optional<string> = headers.get(name);
+    if (value == None) {
+        value = headers.get(name.toLowerCase());
+    }
+    if (value == None) {
+        return "";
+    }
+    return value as string;
+}
+
+function errorDetail(error: any): string {
+    if (error == None) {
+        return "Unknown error";
+    }
+
+    if (typeof(error) == "string") {
+        return error as string;
+    }
+
+    if (typeof(error) == "object") {
+        if (error["message"] != None) {
+            return String(error["message"]);
+        }
+        if (error["errmsg"] != None) {
+            return String(error["errmsg"]);
+        }
+
+        try {
+            let serialized: string = stringify(error);
+            if (serialized != "{}") {
+                return serialized;
+            }
+        } catch (stringifyError) {
+        }
+
+        return "object keys=" + stringify(Object.keys(error));
+    }
+
+    return String(error);
+}
+
+function requestContentLength(headerText: string): int {
+    let lines: string[] = headerText.split("\r\n");
+    let headers: Map<string, string> = parseHeaderLines(lines, 1);
+    let rawLength: string = headerValue(headers, "content-length");
+    if (rawLength == "") {
+        return 0;
+    }
+    return parseDecimalInt(rawLength);
+}
+
+export function readRawRequest(stream: TcpStream): string {
+    let raw: string = "";
+    let separator: int = -1;
+    let headerComplete: bool = false;
+
+    while (!headerComplete) {
+        let chunk: string = stream.receive(4096);
+        if (chunk == "") {
+            return raw;
+        }
+
+        raw = raw + chunk;
+        separator = raw.indexOf("\r\n\r\n");
+        if (separator >= 0) {
+            headerComplete = true;
+        }
+    }
+
+    let headerText: string = raw.substring(0, separator);
+    let bodyStart: int = separator + 4;
+    let expectedBodyLength: int = requestContentLength(headerText);
+
+    while ((raw.length() - bodyStart) < expectedBodyLength) {
+        let chunk: string = stream.receive(4096);
+        if (chunk == "") {
+            return raw;
+        }
+        raw = raw + chunk;
+    }
+
+    return raw;
+}
+
+export class Request {
+    method: string;
+    rawPath: string;
+    path: string;
+    query: string;
+    httpVersion: string;
+    headers: Map<string, string>;
+    body: string;
+
+    constructor(raw: string) {
+        this.method = "GET";
+        this.rawPath = "/";
+        this.path = "/";
+        this.query = "";
+        this.httpVersion = "HTTP/1.1";
+        this.headers = new Map<string, string>();
+        this.body = "";
+
+        let separator: int = raw.indexOf("\r\n\r\n");
+        let headerText: string = raw;
+        if (separator >= 0) {
+            headerText = raw.substring(0, separator);
+            this.body = raw.substring(separator + 4, raw.length());
+        }
+
+        let lines: string[] = headerText.split("\r\n");
+        if (lines.length() == 0) return;
+
+        let firstLine: string[] = lines[0].split(" ");
+        if (firstLine.length() >= 3) {
+            this.method = stableText(firstLine[0]).toUpperCase();
+            this.rawPath = stableText(firstLine[1]);
+            this.httpVersion = stableText(firstLine[2]);
+        } else if (firstLine.length() >= 2) {
+            this.method = stableText(firstLine[0]).toUpperCase();
+            this.rawPath = stableText(firstLine[1]);
+        }
+
+        let queryStart: int = this.rawPath.indexOf("?");
+        if (queryStart >= 0) {
+            this.path = stableText(this.rawPath.substring(0, queryStart));
+            this.query = stableText(this.rawPath.substring(queryStart + 1, this.rawPath.length()));
+        } else {
+            this.path = stableText(this.rawPath);
+        }
+
+        this.headers = parseHeaderLines(lines, 1);
+    }
+
+    static snapshot(req: Request): Request {
+        let copy: Request = new Request("");
+        copy.method = stableText(req.method).toUpperCase();
+        copy.rawPath = stableCopy(req.rawPath);
+        copy.path = stableCopy(req.path);
+        copy.query = stableCopy(req.query);
+        copy.httpVersion = stableText(req.httpVersion);
+        copy.headers = new Map<string, string>();
+
+        let keys: string[] = req.headers.keys();
+        for (let i: int = 0; i < keys.length(); i++) {
+            let key: string = stableText(keys[i]).toLowerCase();
+            copy.headers.set(key, stableCopy(headerValue(req.headers, keys[i])));
+        }
+
+        copy.body = stableCopy(req.body);
+        return copy;
+    }
+
+    header(name: string): string {
+        return headerValue(this.headers, name);
+    }
+
+    queryParam(name: string): string {
+        return parseQueryValue(this.query, name);
+    }
+}
+
+export class Response {
+    status: int;
+    headers: Map<string, string>;
+    body: string;
+
+    constructor() {
+        this.status = 200;
+        this.headers = new Map<string, string>();
+        this.headers.set("content-type", "application/json; charset=utf-8");
+        this.headers.set("connection", "close");
+        this.body = "";
+    }
+
+    setHeader(name: string, value: string): void {
+        this.headers.set(name.toLowerCase(), value);
+    }
+
+    header(name: string): string {
+        return headerValue(this.headers, name);
+    }
+
+    send(stream: TcpStream): void {
+        let statusText = statusTextForCode(this.status);
+        if (this.status == 204) {
+            this.body = "";
+        }
+
+        let res: string = "HTTP/1.1 " + String(this.status) + " " + statusText + "\r\n";
+
+        let keys: string[] = this.headers.keys();
+        for (let i = 0; i < keys.length(); i++) {
+            let k: string = keys[i];
+            let value: string = headerValue(this.headers, k);
+            res = res + k + ": " + value + "\r\n";
+        }
+
+        res = res + "Content-Length: " + String(this.body.length()) + "\r\n\r\n";
+        res = res + this.body;
+
+        stream.send(res);
+    }
+}
+
+export function methodIs(req: Request, expected: string): bool {
+    let actual: string = stableText(req.method).toUpperCase();
+    let target: string = stableText(expected).toUpperCase();
+    return actual == target || actual.startsWith(target);
+}
+
+export function stableMethod(req: Request): string {
+    return stableText(req.method).toUpperCase();
+}
+
+export function stablePath(req: Request): string {
+    return stableCopy(req.path);
+}
+
+export function stableBody(req: Request): string {
+    return stableCopy(req.body);
+}
+
+export class Server {
+    private listener: Optional<TcpListener>;
+
+    constructor() {
+        this.listener = None;
+    }
+
+    private handleConnection(stream: TcpStream, handler: (req: Request) => Response): void {
+        try {
+            let raw: string = readRawRequest(stream);
+            if (raw == "") {
+                stream.close();
+                return;
+            }
+
+            let req: Request = Request.snapshot(new Request(raw));
+            let res: Response = handler(req);
+            res.send(stream);
+            stream.close();
+        } catch (error) {
+            let detail: string = errorDetail(error);
+            print("server_request_error=", detail);
+            let res = createJsonResponse({
+                error: "Internal server error",
+                detail: detail
+            }, 500);
+            res.send(stream);
+            stream.close();
+        }
+    }
+
+    listen(addr: string, handler: (req: Request) => Response): void {
+        let listener = net.listen(addr);
+        this.listener = listener;
+
+        while (true) {
+            try {
+                let stream = listener.accept();
+                this.handleConnection(stream, handler);
+            } catch (acceptError) {
+                throw new Error("Accept failed on " + addr + ": " + errorDetail(acceptError));
+            }
+        }
+    }
+
+    close(): void {
+        if (this.listener != None) {
+            (this.listener as TcpListener).close();
+            this.listener = None;
+        }
+    }
+}
+
+function statusTextForCode(status: int): string {
+    if (status == 200) return "OK";
+    if (status == 201) return "Created";
+    if (status == 202) return "Accepted";
+    if (status == 204) return "No Content";
+    if (status == 400) return "Bad Request";
+    if (status == 401) return "Unauthorized";
+    if (status == 403) return "Forbidden";
+    if (status == 404) return "Not Found";
+    if (status == 405) return "Method Not Allowed";
+    if (status == 409) return "Conflict";
+    if (status == 422) return "Unprocessable Entity";
+    if (status == 500) return "Internal Server Error";
+    return "OK";
+}
+
+export function createJsonResponse(data: any, status: int): Response {
+    let r = new Response();
+    r.status = status;
+    r.body = stringify(data);
+    return r;
+}
+
+export function createTextResponse(data: string, status: int): Response {
+    let r = new Response();
+    r.status = status;
+    r.setHeader("Content-Type", "text/plain; charset=utf-8");
+    r.body = data;
+    return r;
+}
+
+export function createEmptyResponse(status: int): Response {
+    let r = new Response();
+    r.status = status;
+    r.body = "";
+    return r;
+}
