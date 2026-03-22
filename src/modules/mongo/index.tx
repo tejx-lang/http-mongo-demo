@@ -1,0 +1,145 @@
+import { primeMongoConnection, MongoClient } from "./client.tx";
+import { MongoConnectionConfig } from "./config.tx";
+
+export class MongoConnection {
+    uri: string;
+    host: string;
+    port: int;
+    database: string;
+    username: string;
+    password: string;
+    authDatabase: string;
+    replicaSet: string;
+
+    constructor(
+        uri: string,
+        host: string,
+        port: int,
+        database: string,
+        username: string,
+        password: string,
+        authDatabase: string,
+        replicaSet: string
+    ) {
+        this.uri = uri;
+        this.host = host;
+        this.port = port;
+        this.database = database;
+        this.username = username;
+        this.password = password;
+        this.authDatabase = authDatabase;
+        this.replicaSet = replicaSet;
+    }
+}
+
+export class MongoDatabase extends MongoClient {
+    constructor(connection: MongoConnection) {
+        super(new MongoConnectionConfig(
+            connection.uri,
+            connection.host,
+            connection.port,
+            connection.database,
+            connection.username,
+            connection.password,
+            connection.authDatabase,
+            connection.replicaSet
+        ));
+    }
+
+    databaseName(): string {
+        return super.databaseName();
+    }
+
+    address(): string {
+        return super.address();
+    }
+
+    ping(): void {
+        super.ping();
+    }
+
+    find(collection: string, filter: any): any[] {
+        return super.find(collection, filter);
+    }
+
+    findOne(collection: string, filter: any): any {
+        return super.findOne(collection, filter);
+    }
+
+    insertOne(collection: string, document: any): any {
+        return super.insertOne(collection, document);
+    }
+
+    updateOne(collection: string, filter: any, setFields: any): any {
+        return super.updateOne(collection, filter, setFields);
+    }
+
+    upsertOne(collection: string, filter: any, setFields: any): any {
+        return super.upsertOne(collection, filter, setFields);
+    }
+
+    deleteOne(collection: string, filter: any): any {
+        return super.deleteOne(collection, filter);
+    }
+
+    close(): void {
+        super.close();
+    }
+}
+
+function toInternalConnection(connection: MongoConnection): MongoConnectionConfig {
+    return new MongoConnectionConfig(
+        connection.uri,
+        connection.host,
+        connection.port,
+        connection.database,
+        connection.username,
+        connection.password,
+        connection.authDatabase,
+        connection.replicaSet
+    );
+}
+
+export function createMongoConnection(
+    uri: string = "",
+    host: string = "127.0.0.1",
+    port: int = 27017,
+    database: string = "",
+    username: string = "",
+    password: string = "",
+    authDatabase: string = "",
+    replicaSet: string = ""
+): MongoConnection {
+    return new MongoConnection(
+        uri,
+        host,
+        port,
+        database,
+        username,
+        password,
+        authDatabase,
+        replicaSet
+    );
+}
+
+export function copyMongoConnection(connection: MongoConnection): MongoConnection {
+    return createMongoConnection(
+        connection.uri,
+        connection.host,
+        connection.port,
+        connection.database,
+        connection.username,
+        connection.password,
+        connection.authDatabase,
+        connection.replicaSet
+    );
+}
+
+export function connectMongo(connection: MongoConnection): MongoDatabase {
+    return new MongoDatabase(connection);
+}
+
+export function warmMongoConnection(connection: MongoConnection): void {
+    let internal: MongoConnectionConfig = cloneConnectionConfig(toInternalConnection(connection));
+    primeMongoConnection(internal);
+}

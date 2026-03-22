@@ -1,4 +1,4 @@
-import { stringify } from "std:json";
+import { parse, stringify } from "std:json";
 import { Map } from "std:collections";
 import { HttpClient, HttpClientResponse, copyHeaders, createHeaders, createJsonHeaders } from "./client.tx";
 
@@ -6,21 +6,72 @@ let httpClient = new HttpClient("http", "80", false);
 let httpsClient = new HttpClient("https", "443", false);
 let httpsInsecureClient = new HttpClient("https", "443", true);
 
-function configMethod(config: any): string {
+export class HttpRequest {
+    method: string;
+    body: string;
+    headers: Map<string, string>;
+    json: any;
+    insecureTls: bool;
+
+    constructor(method: string, body: string, headers: Map<string, string>, jsonBody: any, insecureTls: bool) {
+        this.method = method;
+        this.body = body;
+        this.headers = copyHeaders(headers);
+        this.json = jsonBody;
+        this.insecureTls = insecureTls;
+    }
+}
+
+export class HttpResponse {
+    httpVersion: string;
+    status: int;
+    statusText: string;
+    headers: Map<string, string>;
+    body: string;
+
+    constructor(response: HttpClientResponse) {
+        this.httpVersion = response.httpVersion;
+        this.status = response.status;
+        this.statusText = response.statusText;
+        this.headers = copyHeaders(response.headers);
+        this.body = response.body;
+    }
+
+    header(name: string): string {
+        let value: Optional<string> = this.headers.get(name.toLowerCase());
+        if (value == None) {
+            return "";
+        }
+        return value as string;
+    }
+
+    ok(): bool {
+        return this.status >= 200 && this.status < 300;
+    }
+
+    json(): any {
+        if (this.body.trim() == "") {
+            return {};
+        }
+        return parse(this.body);
+    }
+}
+
+function requestMethod(config: any): string {
     if (config != None && config["method"] != None) {
         return String(config["method"]).toUpperCase();
     }
     return "GET";
 }
 
-function configHeaders(config: any): Map<string, string> {
+function requestHeaders(config: any): Map<string, string> {
     if (config != None && config["headers"] != None) {
         return copyHeaders(config["headers"] as Map<string, string>);
     }
     return createHeaders();
 }
 
-function configInsecureTls(config: any): bool {
+function requestInsecureTls(config: any): bool {
     if (config != None && config["insecureTls"] != None) {
         return config["insecureTls"] as bool;
     }
@@ -30,11 +81,11 @@ function configInsecureTls(config: any): bool {
     return false;
 }
 
-function configHasJson(config: any): bool {
+function requestHasJson(config: any): bool {
     return config != None && config["json"] != None;
 }
 
-function configBody(config: any): string {
+function requestBody(config: any): string {
     if (config == None || config["body"] == None) {
         return "";
     }
@@ -43,7 +94,7 @@ function configBody(config: any): string {
 
 function clientFor(url: string, config: any): HttpClient {
     if (url.startsWith("https://")) {
-        if (configInsecureTls(config)) {
+        if (requestInsecureTls(config)) {
             return httpsInsecureClient;
         }
         return httpsClient;
@@ -51,12 +102,39 @@ function clientFor(url: string, config: any): HttpClient {
     return httpClient;
 }
 
-export function fetch(url: string, config: any = None): HttpClientResponse {
-    let method: string = configMethod(config);
-    let headers: Map<string, string> = configHeaders(config);
+function wrapResponse(response: HttpClientResponse): HttpResponse {
+    return new HttpResponse(response);
+}
+
+export function createRequest(
+    method: string = "GET",
+    body: string = "",
+    headers: Optional<Map<string, string>> = None,
+    jsonBody: any = None,
+    insecureTls: bool = false
+): HttpRequest {
+    let stableHeaders: Map<string, string> = headers != None ? copyHeaders(headers as Map<string, string>) : createHeaders();
+    return new HttpRequest(method, body, stableHeaders, jsonBody, insecureTls);
+}
+
+export function createHttpHeaders(): Map<string, string> {
+    return createHeaders();
+}
+
+export function createJsonRequestHeaders(): Map<string, string> {
+    return createJsonHeaders();
+}
+
+export function copyHttpHeaders(headers: Map<string, string>): Map<string, string> {
+    return copyHeaders(headers);
+}
+
+export function fetch(url: string, config: any = None): HttpResponse {
+    let method: string = requestMethod(config);
+    let headers: Map<string, string> = requestHeaders(config);
     let client: HttpClient = clientFor(url, config);
 
-    if (configHasJson(config)) {
+    if (requestHasJson(config)) {
         let jsonHeaders: Map<string, string> = createJsonHeaders();
         let customHeaders: Map<string, string> = copyHeaders(headers);
         let keys: string[] = customHeaders.keys();
@@ -67,28 +145,28 @@ export function fetch(url: string, config: any = None): HttpClientResponse {
                 jsonHeaders.set(key, value as string);
             }
         }
-        return client.request(method, url, stringify(config["json"]), jsonHeaders);
+        return wrapResponse(client.request(method, url, stringify(config["json"]), jsonHeaders));
     }
 
-    return client.request(method, url, configBody(config), headers);
+    return wrapResponse(client.request(method, url, requestBody(config), headers));
 }
 
-export function get(url: string): HttpClientResponse {
+export function get(url: string): HttpResponse {
     return fetch(url);
 }
 
-export function post(url: string, body: string): HttpClientResponse {
+export function post(url: string, body: string): HttpResponse {
     return fetch(url, { method: "POST", body: body });
 }
 
-export function put(url: string, body: string): HttpClientResponse {
+export function put(url: string, body: string): HttpResponse {
     return fetch(url, { method: "PUT", body: body });
 }
 
-export function patch(url: string, body: string): HttpClientResponse {
+export function patch(url: string, body: string): HttpResponse {
     return fetch(url, { method: "PATCH", body: body });
 }
 
-export function deleteRequest(url: string): HttpClientResponse {
+export function deleteRequest(url: string): HttpResponse {
     return fetch(url, { method: "DELETE" });
 }

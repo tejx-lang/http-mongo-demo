@@ -1,8 +1,7 @@
 import { resolveMongoConnection } from "../config/env.tx";
-import { MongoClient } from "../../modules/mongo/client.tx";
-import { MongoConnectionConfig, cloneConnectionConfig } from "../../modules/mongo/config.tx";
+import { MongoConnection, MongoDatabase, connectMongo, copyMongoConnection } from "../../modules/mongo/index.tx";
 
-let mongoConnectionState: Optional<MongoConnectionConfig> = None;
+let mongoConnectionState: Optional<MongoConnection> = None;
 
 export function cloneWithoutMongoFields(document: any): any {
     let copy: any = {};
@@ -27,31 +26,31 @@ export function withMongoId(document: any): any {
     return copy;
 }
 
-export function createMongoClient(): MongoClient {
-    let connection: Optional<MongoConnectionConfig> = mongoConnectionState;
+export function createMongoClient(): MongoDatabase {
+    let connection: Optional<MongoConnection> = mongoConnectionState;
     if (connection == None) {
         connection = resolveMongoConnection();
     }
 
-    return new MongoClient(cloneConnectionConfig(connection as MongoConnectionConfig));
+    return connectMongo(copyMongoConnection(connection as MongoConnection));
 }
 
-export function configureDatabaseConnection(connection: MongoConnectionConfig): void {
-    mongoConnectionState = cloneConnectionConfig(connection);
+export function configureDatabaseConnection(connection: MongoConnection): void {
+    mongoConnectionState = copyMongoConnection(connection);
 }
 
-export function insertDocument(client: MongoClient, collection: string, document: any): void {
+export function insertDocument(client: MongoDatabase, collection: string, document: any): void {
     client.insertOne(collection, withMongoId(document));
 }
 
-export function updateDocument(client: MongoClient, collection: string, id: string, document: any): void {
+export function updateDocument(client: MongoDatabase, collection: string, id: string, document: any): void {
     client.updateOne(collection, { "_id": id }, cloneWithoutMongoFields(document));
 }
 
-export function upsertDocument(client: MongoClient, collection: string, filter: any, document: any): void {
+export function upsertDocument(client: MongoDatabase, collection: string, filter: any, document: any): void {
     client.upsertOne(collection, filter, cloneWithoutMongoFields(document));
 }
 
-export function deleteDocument(client: MongoClient, collection: string, id: string): void {
+export function deleteDocument(client: MongoDatabase, collection: string, id: string): void {
     client.deleteOne(collection, { "_id": id });
 }

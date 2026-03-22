@@ -1,12 +1,12 @@
-import { MongoClient } from "../../modules/mongo/client.tx";
-import { AppEvent, EventCollection, eventToView } from "../features/events/model.tx";
+import { MongoDatabase } from "../../modules/mongo/index.tx";
+import { EventCollection } from "../features/events/model.tx";
 import { AppMeta } from "../features/meta/model.tx";
-import { AppOrder, OrderCollection, orderToView } from "../features/orders/model.tx";
-import { AppProduct, ProductCollection, productToView } from "../features/products/model.tx";
-import { AppUser, UserCollection, userToPublicDocument } from "../features/users/model.tx";
+import { OrderCollection } from "../features/orders/model.tx";
+import { ProductCollection } from "../features/products/model.tx";
+import { UserCollection } from "../features/users/model.tx";
 
 export class AppState {
-    client: MongoClient;
+    client: MongoDatabase;
     meta: AppMeta;
     users: UserCollection;
     products: ProductCollection;
@@ -14,7 +14,7 @@ export class AppState {
     events: EventCollection;
 
     constructor(
-        client: MongoClient,
+        client: MongoDatabase,
         meta: AppMeta,
         users: UserCollection,
         products: ProductCollection,
@@ -28,52 +28,4 @@ export class AppState {
         this.orders = orders;
         this.events = events;
     }
-}
-
-export function eventMap(events: EventCollection): any {
-    let items: any = {};
-    for (let i: int = 0; i < events.ids.length(); i++) {
-        let eventId: string = events.ids[i];
-        let eventValue: Optional<AppEvent> = events.items.get(eventId);
-        if (eventValue != None) {
-            items[eventId] = eventToView(eventValue as AppEvent);
-        }
-    }
-    return items;
-}
-
-export function userMap(users: UserCollection): any {
-    let items: any = {};
-    for (let i: int = 0; i < users.ids.length(); i++) {
-        let userId: string = users.ids[i];
-        let userValue: Optional<AppUser> = users.items.get(userId);
-        if (userValue != None) {
-            items[userId] = userToPublicDocument(userValue as AppUser);
-        }
-    }
-    return items;
-}
-
-export function productMap(products: ProductCollection): any {
-    let items: any = {};
-    for (let i: int = 0; i < products.ids.length(); i++) {
-        let productId: string = products.ids[i];
-        let productValue: Optional<AppProduct> = products.items.get(productId);
-        if (productValue != None) {
-            items[productId] = productToView(productValue as AppProduct);
-        }
-    }
-    return items;
-}
-
-export function orderMap(orders: OrderCollection): any {
-    let items: any = {};
-    for (let i: int = 0; i < orders.ids.length(); i++) {
-        let orderId: string = orders.ids[i];
-        let orderValue: Optional<AppOrder> = orders.items.get(orderId);
-        if (orderValue != None) {
-            items[orderId] = orderToView(orderValue as AppOrder);
-        }
-    }
-    return items;
 }

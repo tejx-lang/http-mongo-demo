@@ -4,13 +4,13 @@ import { nowMs } from "std:time";
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { findIdIndex, nextEntityId } from "../../core/ids.tx";
 import { jsonError } from "../../core/responses.tx";
-import { AppState, orderMap } from "../../core/state.tx";
+import { AppState } from "../../core/state.tx";
 import { recordAppEvent, touchAppState } from "../../core/store.tx";
 import { AppProduct } from "../products/model.tx";
 import { getProduct } from "../products/repository.tx";
 import { AppUser } from "../users/model.tx";
 import { getUser } from "../users/repository.tx";
-import { AppOrder, OrderCollection, orderToView } from "./model.tx";
+import { AppOrder, OrderCollection, orderToView, ordersToDocument } from "./model.tx";
 import { deleteOrder, getOrder, insertOrder, updateOrder } from "./repository.tx";
 
 function parseBody(body: string): any {
@@ -49,11 +49,7 @@ function removeOrderFromState(orders: OrderCollection, id: string): void {
 
 export function handleOrdersCollection(method: string, body: string, state: AppState): Response {
     if (method == "GET") {
-        return createJsonResponse({
-            count: state.orders.ids.length(),
-            ids: state.orders.ids,
-            items: orderMap(state.orders)
-        }, 200);
+        return createJsonResponse(ordersToDocument(state.orders), 200);
     }
 
     if (method == "POST") {

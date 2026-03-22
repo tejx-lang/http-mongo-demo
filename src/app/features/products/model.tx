@@ -19,20 +19,6 @@ export class AppProduct {
     }
 }
 
-export class ProductPayload {
-    name: Optional<string>;
-    category: Optional<string>;
-    price: Optional<float>;
-    stock: Optional<int>;
-
-    constructor() {
-        this.name = None;
-        this.category = None;
-        this.price = None;
-        this.stock = None;
-    }
-}
-
 export class ProductCollection {
     ids: string[];
     items: Map<string, AppProduct>;
@@ -72,4 +58,47 @@ export function productFromDocument(document: any): Optional<AppProduct> {
 
 export function productToView(product: AppProduct): any {
     return productToDocument(product);
+}
+
+export function productsToDocument(products: ProductCollection): any {
+    let items: any = {};
+
+    for (let i: int = 0; i < products.ids.length(); i++) {
+        let productId: string = products.ids[i];
+        let productValue: Optional<AppProduct> = products.items.get(productId);
+        if (productValue != None) {
+            items[productId] = productToView(productValue as AppProduct);
+        }
+    }
+
+    return {
+        count: products.ids.length(),
+        ids: products.ids,
+        items: items
+    };
+}
+
+export function lowStockProductsToDocument(products: ProductCollection, threshold: int = 10): any {
+    let ids: string[] = [];
+    let items: any = {};
+
+    for (let i: int = 0; i < products.ids.length(); i++) {
+        let productId: string = products.ids[i];
+        let productValue: Optional<AppProduct> = products.items.get(productId);
+        if (productValue == None) {
+            continue;
+        }
+
+        let product: AppProduct = productValue as AppProduct;
+        if (product.stock < threshold) {
+            ids.push(productId);
+            items[productId] = productToView(product);
+        }
+    }
+
+    return {
+        count: ids.length(),
+        ids: ids,
+        items: items
+    };
 }

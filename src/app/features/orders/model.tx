@@ -27,18 +27,6 @@ export class AppOrder {
     }
 }
 
-export class OrderPayload {
-    userId: Optional<string>;
-    status: Optional<string>;
-    productIds: string[];
-
-    constructor() {
-        this.userId = None;
-        this.status = None;
-        this.productIds = [];
-    }
-}
-
 export class OrderCollection {
     ids: string[];
     items: Map<string, AppOrder>;
@@ -87,4 +75,36 @@ export function orderFromDocument(document: any): Optional<AppOrder> {
 
 export function orderToView(order: AppOrder): any {
     return orderToDocument(order);
+}
+
+export function ordersToDocument(orders: OrderCollection): any {
+    let items: any = {};
+
+    for (let i: int = 0; i < orders.ids.length(); i++) {
+        let orderId: string = orders.ids[i];
+        let orderValue: Optional<AppOrder> = orders.items.get(orderId);
+        if (orderValue != None) {
+            items[orderId] = orderToView(orderValue as AppOrder);
+        }
+    }
+
+    return {
+        count: orders.ids.length(),
+        ids: orders.ids,
+        items: items
+    };
+}
+
+export function totalOrderRevenue(orders: OrderCollection): float {
+    let revenue: float = 0.0;
+
+    for (let i: int = 0; i < orders.ids.length(); i++) {
+        let orderId: string = orders.ids[i];
+        let orderValue: Optional<AppOrder> = orders.items.get(orderId);
+        if (orderValue != None) {
+            revenue = revenue + (orderValue as AppOrder).total;
+        }
+    }
+
+    return revenue;
 }

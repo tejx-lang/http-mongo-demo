@@ -1,0 +1,11 @@
+import { Response } from "../../../modules/server/index.tx";
+import { AppState } from "../../core/state.tx";
+import { handleOrderItem, handleOrdersCollection } from "./handler.tx";
+
+export function handleOrdersRoute(method: string, body: string, state: AppState): Response {
+    return handleOrdersCollection(method, body, state);
+}
+
+export function handleOrderRoute(method: string, body: string, state: AppState, orderId: string): Response {
+    return handleOrderItem(method, body, state, orderId);
+}

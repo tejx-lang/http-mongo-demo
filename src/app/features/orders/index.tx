@@ -1,0 +1,23 @@
+import { MongoDatabase } from "../../../modules/mongo/index.tx";
+import { AppOrder, OrderCollection, orderToView, ordersToDocument, totalOrderRevenue } from "./model.tx";
+import { getOrder, loadOrders } from "./repository.tx";
+
+export function loadOrderCollection(client: MongoDatabase): OrderCollection {
+    return loadOrders(client);
+}
+
+export function findOrder(orders: OrderCollection, id: string): Optional<AppOrder> {
+    return getOrder(orders, id);
+}
+
+export function toOrderView(order: AppOrder): any {
+    return orderToView(order);
+}
+
+export function toOrdersView(orders: OrderCollection): any {
+    return ordersToDocument(orders);
+}
+
+export function totalRevenue(orders: OrderCollection): float {
+    return totalOrderRevenue(orders);
+}

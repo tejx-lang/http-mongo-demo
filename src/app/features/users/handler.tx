@@ -7,7 +7,7 @@ import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
 import { recordAppEvent, touchAppState } from "../../core/store.tx";
 import { AppOrder } from "../orders/model.tx";
-import { AppUser, UserCollection, userToPublicDocument } from "./model.tx";
+import { AppUser, UserCollection, userToPublicDocument, usersToDocument } from "./model.tx";
 import { deleteUser, getUser, insertUser, updateUser, userIndexByEmail } from "./repository.tx";
 
 function parseBody(body: string): any {
@@ -16,26 +16,6 @@ function parseBody(body: string): any {
     }
 
     return parse(body);
-}
-
-function usersPayload(users: UserCollection): any {
-    let safeItems: any = {};
-
-    for (let i: int = 0; i < users.ids.length(); i++) {
-        let userId: string = users.ids[i];
-        let userValue: Optional<AppUser> = getUser(users, userId);
-        if (userValue == None) {
-            continue;
-        }
-
-        safeItems[userId] = userToPublicDocument(userValue as AppUser);
-    }
-
-    return {
-        count: users.ids.length(),
-        ids: users.ids,
-        items: safeItems
-    };
 }
 
 function removeUserFromState(users: UserCollection, id: string): void {
@@ -80,7 +60,7 @@ export function handleUsersCollection(method: string, body: string, state: AppSt
     let users: UserCollection = state.users;
 
     if (method == "GET") {
-        return createJsonResponse(usersPayload(users), 200);
+        return createJsonResponse(usersToDocument(users), 200);
     }
 
     if (method == "POST") {

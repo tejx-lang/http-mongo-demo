@@ -19,36 +19,6 @@ export class AppUser {
     }
 }
 
-export class PublicUser {
-    id: string;
-    name: string;
-    email: string;
-    role: string;
-    createdAt: int64;
-
-    constructor(id: string, name: string, email: string, role: string, createdAt: int64) {
-        this.id = id;
-        this.name = name;
-        this.email = email;
-        this.role = role;
-        this.createdAt = createdAt;
-    }
-}
-
-export class UserPayload {
-    name: Optional<string>;
-    email: Optional<string>;
-    password: Optional<string>;
-    role: Optional<string>;
-
-    constructor() {
-        this.name = None;
-        this.email = None;
-        this.password = None;
-        this.role = None;
-    }
-}
-
 export class UserCollection {
     ids: string[];
     items: Map<string, AppUser>;
@@ -86,11 +56,7 @@ export function userFromDocument(document: any): Optional<AppUser> {
     );
 }
 
-export function toPublicUser(user: AppUser): PublicUser {
-    return new PublicUser(user.id, user.name, user.email, user.role, user.createdAt);
-}
-
-export function publicUserToDocument(user: PublicUser): any {
+export function userToPublicDocument(user: AppUser): any {
     return {
         id: user.id,
         name: user.name,
@@ -100,6 +66,20 @@ export function publicUserToDocument(user: PublicUser): any {
     };
 }
 
-export function userToPublicDocument(user: AppUser): any {
-    return publicUserToDocument(toPublicUser(user));
+export function usersToDocument(users: UserCollection): any {
+    let items: any = {};
+
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let userId: string = users.ids[i];
+        let userValue: Optional<AppUser> = users.items.get(userId);
+        if (userValue != None) {
+            items[userId] = userToPublicDocument(userValue as AppUser);
+        }
+    }
+
+    return {
+        count: users.ids.length(),
+        ids: users.ids,
+        items: items
+    };
 }

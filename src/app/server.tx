@@ -1,52 +1,58 @@
 import { resolvePort, resolveBaseUrl, resolveMongoConnection, resolveMongoStorageName } from "./config/env.tx";
 import { configureDatabaseConnection } from "./core/persistence.tx";
 import { ensureAppState } from "./core/store.tx";
-import { MongoClient } from "../modules/mongo/client.tx";
-import { MongoConnectionConfig } from "../modules/mongo/config.tx";
+import { MongoConnection, MongoDatabase, connectMongo } from "../modules/mongo/index.tx";
 import { describeError } from "../modules/errors/index.tx";
-import { Request, Response, Server } from "../modules/server/index.tx";
-import { handleRequest } from "./router/index.tx";
-
-let storageName: string = "";
+import { Server } from "../modules/server/index.tx";
+import { createAppHandler } from "./router/index.tx";
 
 class ApplicationRuntime {
-    client: MongoClient;
+    client: MongoDatabase;
+    port: string;
+    baseUrl: string;
+    storageName: string;
 
-    constructor(client: MongoClient) {
+    constructor(client: MongoDatabase, port: string, baseUrl: string, storageName: string) {
         this.client = client;
+        this.port = port;
+        this.baseUrl = baseUrl;
+        this.storageName = storageName;
     }
 }
 
-let runtimeState: Optional<ApplicationRuntime> = None;
+function createApplicationRuntime(): ApplicationRuntime {
+    let mongoConnection: MongoConnection = resolveMongoConnection();
+    configureDatabaseConnection(mongoConnection);
+
+    let client: MongoDatabase = connectMongo(mongoConnection);
+    ensureAppState(client);
+
+    let port: string = resolvePort();
+    return new ApplicationRuntime(
+        client,
+        port,
+        resolveBaseUrl(port),
+        resolveMongoStorageName()
+    );
+}
+
+function logStartup(runtime: ApplicationRuntime): void {
+    print("Starting TejX multi-API server on port ", runtime.port);
+    print("Storage: ", runtime.storageName);
+    print("Server started at ", runtime.baseUrl);
+    print("Try: GET /health, GET /api/users, GET /api/products, GET /api/orders, GET /api/reports/summary");
+}
+
+function startApplicationServer(runtime: ApplicationRuntime): void {
+    let server = new Server();
+    server.listen("127.0.0.1:" + runtime.port, createAppHandler(runtime.storageName, runtime.client));
+}
 
 export function runApplication(): void {
     try {
-        let mongoConnection: MongoConnectionConfig = resolveMongoConnection();
-        configureDatabaseConnection(mongoConnection);
-        let appClient = new MongoClient(mongoConnection);
-        ensureAppState(appClient);
-        runtimeState = new ApplicationRuntime(appClient);
-
-        let port: string = resolvePort();
-        let baseUrl: string = resolveBaseUrl(port);
-        storageName = resolveMongoStorageName();
-
-        let server = new Server();
-        function appHandler(req: Request): Response {
-            let runtimeValue: Optional<ApplicationRuntime> = runtimeState;
-            if (runtimeValue == None) {
-                return new Response();
-            }
-
-            let runtime: ApplicationRuntime = runtimeValue as ApplicationRuntime;
-            return handleRequest(req, storageName, runtime.client);
-        }
-
-        print("Starting TejX multi-API server on port ", port);
-        print("Storage: ", storageName);
-        print("Server started at ", baseUrl);
-        print("Try: GET /health, GET /api/users, GET /api/products, GET /api/orders, GET /api/reports/summary");
-        server.listen("127.0.0.1:" + port, appHandler);
+        let runtime: ApplicationRuntime = createApplicationRuntime();
+        logStartup(runtime);
+        startApplicationServer(runtime);
     } catch (error) {
         print("FATAL ERROR starting server: ", describeError(error));
         exit(1);

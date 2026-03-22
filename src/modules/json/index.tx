@@ -1,0 +1,22 @@
+import { jsonBoolean, jsonNumber, jsonString, jsonStringArray } from "./fields.tx";
+import { parseJson } from "./parser.tx";
+
+export function parse(text: string): any {
+    return parseJson(text);
+}
+
+export function readString(text: string, key: string): Optional<string> {
+    return jsonString(text, key);
+}
+
+export function readNumber(text: string, key: string): Optional<float> {
+    return jsonNumber(text, key);
+}
+
+export function readBoolean(text: string, key: string): Optional<bool> {
+    return jsonBoolean(text, key);
+}
+
+export function readStringArray(text: string, key: string): string[] {
+    return jsonStringArray(text, key);
+}

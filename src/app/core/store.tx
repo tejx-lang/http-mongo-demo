@@ -1,39 +1,38 @@
 import { nowMs } from "std:time";
 import { nextEntityId } from "./ids.tx";
 import { AppState } from "./state.tx";
-import { MongoClient } from "../../modules/mongo/client.tx";
-import { AppEvent } from "../features/events/model.tx";
-import { insertEvent, loadEvents } from "../features/events/repository.tx";
-import { ensureMeta, loadMeta, saveMeta } from "../features/meta/repository.tx";
-import { loadOrders } from "../features/orders/repository.tx";
-import { loadProducts } from "../features/products/repository.tx";
-import { loadUsers } from "../features/users/repository.tx";
+import { MongoDatabase } from "../../modules/mongo/index.tx";
+import { createEventRecord, loadEventCollection, saveEventRecord } from "../features/events/index.tx";
+import { bootstrapMeta, loadMetaState, saveMetaState } from "../features/meta/index.tx";
+import { loadOrderCollection } from "../features/orders/index.tx";
+import { loadProductCollection } from "../features/products/index.tx";
+import { loadUserCollection } from "../features/users/index.tx";
 
-export function ensureAppState(client: MongoClient): void {
-    ensureMeta(client);
+export function ensureAppState(client: MongoDatabase): void {
+    bootstrapMeta(client);
 }
 
-export function loadAppState(client: MongoClient): AppState {
+export function loadAppState(client: MongoDatabase): AppState {
     return new AppState(
         client,
-        loadMeta(client),
-        loadUsers(client),
-        loadProducts(client),
-        loadOrders(client),
-        loadEvents(client)
+        loadMetaState(client),
+        loadUserCollection(client),
+        loadProductCollection(client),
+        loadOrderCollection(client),
+        loadEventCollection(client)
     );
 }
 
 export function touchAppState(state: AppState): void {
     state.meta.updatedAt = nowMs();
-    saveMeta(state.client, state.meta);
+    saveMetaState(state.client, state.meta);
 }
 
 export function recordAppEvent(state: AppState, action: string, entity: string, entityId: string): void {
     let eventId: string = nextEntityId("event", state.events.ids);
-    let event = new AppEvent(eventId, action, entity, entityId, nowMs());
+    let event = createEventRecord(eventId, action, entity, entityId, nowMs());
 
     state.events.ids.push(eventId);
     state.events.items.set(eventId, event);
-    insertEvent(state.client, event);
+    saveEventRecord(state.client, event);
 }

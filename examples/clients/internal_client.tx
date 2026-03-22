@@ -2,7 +2,6 @@ import { stringify } from "std:json";
 import { getEnv } from "std:system";
 import { nowMs } from "std:time";
 import { fetch } from "../../src/modules/http/index.tx";
-import { HttpClientResponse } from "../../src/modules/http/client.tx";
 
 function resolveBaseUrl(): string {
     let baseUrl = getEnv("APP_BASE_URL");
@@ -12,10 +11,10 @@ function resolveBaseUrl(): string {
     return "http://127.0.0.1:3000";
 }
 
-function printResponse(label: string, response: HttpClientResponse): void {
+function printResponse(label: string, status: int, body: string): void {
     print(label);
-    print("Status: ", response.status);
-    print(response.body);
+    print("Status: ", status);
+    print(body);
 }
 
 function main() {
@@ -24,8 +23,8 @@ function main() {
     let email: string = "demo-" + suffix;
     let password: string = "demo123";
 
-    let health: HttpClientResponse = fetch(baseUrl + "/health");
-    let createUser: HttpClientResponse = fetch(baseUrl + "/api/users", {
+    let health = fetch(baseUrl + "/health");
+    let createUser = fetch(baseUrl + "/api/users", {
         method: "POST",
         body: stringify({
         name: "Demo User " + suffix,
@@ -33,7 +32,7 @@ function main() {
         password: password,
         role: "customer"
     })});
-    let createKeyboard: HttpClientResponse = fetch(baseUrl + "/api/products", {
+    let createKeyboard = fetch(baseUrl + "/api/products", {
         method: "POST",
         body: stringify({
         name: "Keyboard " + suffix,
@@ -41,7 +40,7 @@ function main() {
         stock: 15,
         category: "accessories"
     })});
-    let createMouse: HttpClientResponse = fetch(baseUrl + "/api/products", {
+    let createMouse = fetch(baseUrl + "/api/products", {
         method: "POST",
         body: stringify({
         name: "Mouse " + suffix,
@@ -54,26 +53,26 @@ function main() {
     let keyboardData: any = createKeyboard.json();
     let mouseData: any = createMouse.json();
 
-    let login: HttpClientResponse = fetch(baseUrl + "/api/auth/login", {
+    let login = fetch(baseUrl + "/api/auth/login", {
         method: "POST",
         body: stringify({
         email: email,
         password: password
     })});
-    let order: HttpClientResponse = fetch(baseUrl + "/api/orders", {
+    let order = fetch(baseUrl + "/api/orders", {
         method: "POST",
         body: stringify({
         userId: userData["id"],
         productIds: [keyboardData["id"], mouseData["id"]]
     })});
-    let summary: HttpClientResponse = fetch(baseUrl + "/api/reports/summary");
+    let summary = fetch(baseUrl + "/api/reports/summary");
 
     print("Internal API client using ", baseUrl);
-    printResponse("GET /health", health);
-    printResponse("POST /api/users", createUser);
-    printResponse("POST /api/products (keyboard)", createKeyboard);
-    printResponse("POST /api/products (mouse)", createMouse);
-    printResponse("POST /api/auth/login", login);
-    printResponse("POST /api/orders", order);
-    printResponse("GET /api/reports/summary", summary);
+    printResponse("GET /health", health.status, health.body);
+    printResponse("POST /api/users", createUser.status, createUser.body);
+    printResponse("POST /api/products (keyboard)", createKeyboard.status, createKeyboard.body);
+    printResponse("POST /api/products (mouse)", createMouse.status, createMouse.body);
+    printResponse("POST /api/auth/login", login.status, login.body);
+    printResponse("POST /api/orders", order.status, order.body);
+    printResponse("GET /api/reports/summary", summary.status, summary.body);
 }

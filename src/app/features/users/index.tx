@@ -1,0 +1,36 @@
+import { MongoDatabase } from "../../../modules/mongo/index.tx";
+import { AppUser, UserCollection, userToPublicDocument, usersToDocument } from "./model.tx";
+import { findUserByEmail, getUser, loadUsers, userIndexByEmail } from "./repository.tx";
+
+export function loadUserCollection(client: MongoDatabase): UserCollection {
+    return loadUsers(client);
+}
+
+export function findUser(users: UserCollection, id: string): Optional<AppUser> {
+    return getUser(users, id);
+}
+
+export function findUserByEmailAddress(users: UserCollection, email: string): Optional<AppUser> {
+    return findUserByEmail(users, email);
+}
+
+export function hasUserEmail(users: UserCollection, email: string, excludeId: string = ""): bool {
+    let index: int = userIndexByEmail(users, email);
+    if (index < 0) {
+        return false;
+    }
+
+    if (excludeId == "") {
+        return true;
+    }
+
+    return users.ids[index] != excludeId;
+}
+
+export function toUserView(user: AppUser): any {
+    return userToPublicDocument(user);
+}
+
+export function toUsersView(users: UserCollection): any {
+    return usersToDocument(users);
+}

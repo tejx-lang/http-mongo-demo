@@ -1,12 +1,11 @@
 import { resolveMongoConnection } from "../../src/app/config/env.tx";
-import { MongoClient } from "../../src/modules/mongo/client.tx";
+import { MongoConnection, connectMongo } from "../../src/modules/mongo/index.tx";
 import { ensureAppState, loadAppState } from "../../src/app/core/store.tx";
 import { AppState } from "../../src/app/core/state.tx";
-import { MongoConnectionConfig } from "../../src/modules/mongo/config.tx";
 
 function main() {
-    let connection: MongoConnectionConfig = resolveMongoConnection();
-    let client = new MongoClient(connection);
+    let connection: MongoConnection = resolveMongoConnection();
+    let client = connectMongo(connection);
 
     print("resolved_host=", connection.host);
     print("resolved_port=", connection.port);

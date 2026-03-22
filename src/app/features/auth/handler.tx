@@ -4,8 +4,7 @@ import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
 import { AppUser } from "../users/model.tx";
-import { findUserByEmail } from "../users/repository.tx";
-import { userToPublicDocument } from "../users/model.tx";
+import { findUserByEmailAddress, toUserView } from "../users/index.tx";
 
 function loginPayload(body: string): any {
     if (body.trim() == "") {
@@ -28,7 +27,7 @@ export function handleLogin(method: string, body: string, state: AppState): Resp
 
         let email: string = String(payload["email"]);
         let password: string = String(payload["password"]);
-        let userValue: Optional<AppUser> = findUserByEmail(state.users, email);
+        let userValue: Optional<AppUser> = findUserByEmailAddress(state.users, email);
         if (userValue == None) {
             return jsonError("Invalid credentials", 401);
         }
@@ -40,7 +39,7 @@ export function handleLogin(method: string, body: string, state: AppState): Resp
 
         return createJsonResponse({
             token: "token-" + user.id + "-" + String(nowMs()),
-            user: userToPublicDocument(user)
+            user: toUserView(user)
         }, 200);
     } catch (error) {
         return jsonError("Invalid JSON body", 400);

@@ -1,0 +1,7 @@
+import { Response } from "../../../modules/server/index.tx";
+import { AppState } from "../../core/state.tx";
+import { handleLogin } from "./handler.tx";
+
+export function handleAuthRoute(method: string, body: string, state: AppState): Response {
+    return handleLogin(method, body, state);
+}

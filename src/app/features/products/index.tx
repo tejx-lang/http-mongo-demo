@@ -1,0 +1,23 @@
+import { MongoDatabase } from "../../../modules/mongo/index.tx";
+import { AppProduct, ProductCollection, lowStockProductsToDocument, productToView, productsToDocument } from "./model.tx";
+import { getProduct, loadProducts } from "./repository.tx";
+
+export function loadProductCollection(client: MongoDatabase): ProductCollection {
+    return loadProducts(client);
+}
+
+export function findProduct(products: ProductCollection, id: string): Optional<AppProduct> {
+    return getProduct(products, id);
+}
+
+export function toProductView(product: AppProduct): any {
+    return productToView(product);
+}
+
+export function toProductsView(products: ProductCollection): any {
+    return productsToDocument(products);
+}
+
+export function lowStockProductsView(products: ProductCollection, threshold: int = 10): any {
+    return lowStockProductsToDocument(products, threshold);
+}

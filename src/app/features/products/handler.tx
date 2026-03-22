@@ -4,10 +4,10 @@ import { nowMs } from "std:time";
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { findIdIndex, nextEntityId } from "../../core/ids.tx";
 import { jsonError } from "../../core/responses.tx";
-import { AppState, productMap } from "../../core/state.tx";
+import { AppState } from "../../core/state.tx";
 import { recordAppEvent, touchAppState } from "../../core/store.tx";
 import { AppOrder } from "../orders/model.tx";
-import { AppProduct, ProductCollection, productToView } from "./model.tx";
+import { AppProduct, ProductCollection, productToView, productsToDocument } from "./model.tx";
 import { deleteProduct, getProduct, insertProduct, updateProduct } from "./repository.tx";
 
 function parseBody(body: string): any {
@@ -65,11 +65,7 @@ function productExistsInOrders(state: AppState, productId: string): bool {
 
 export function handleProductsCollection(method: string, body: string, state: AppState): Response {
     if (method == "GET") {
-        return createJsonResponse({
-            count: state.products.ids.length(),
-            ids: state.products.ids,
-            items: productMap(state.products)
-        }, 200);
+        return createJsonResponse(productsToDocument(state.products), 200);
     }
 
     if (method == "POST") {

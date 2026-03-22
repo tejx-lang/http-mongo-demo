@@ -1,0 +1,23 @@
+import { MongoDatabase } from "../../../modules/mongo/index.tx";
+import { AppEvent, EventCollection, eventToView, eventsToDocument } from "./model.tx";
+import { insertEvent, loadEvents } from "./repository.tx";
+
+export function loadEventCollection(client: MongoDatabase): EventCollection {
+    return loadEvents(client);
+}
+
+export function createEventRecord(id: string, action: string, entity: string, entityId: string, createdAt: int64): AppEvent {
+    return new AppEvent(id, action, entity, entityId, createdAt);
+}
+
+export function saveEventRecord(client: MongoDatabase, event: AppEvent): void {
+    insertEvent(client, event);
+}
+
+export function toEventView(event: AppEvent): any {
+    return eventToView(event);
+}
+
+export function toEventsView(events: EventCollection): any {
+    return eventsToDocument(events);
+}

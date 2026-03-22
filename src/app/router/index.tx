@@ -1,95 +1,181 @@
 import { Request, Response, createJsonResponse, stableBody, stableMethod, stablePath } from "../../modules/server/index.tx";
-import { MongoClient } from "../../modules/mongo/client.tx";
+import { MongoDatabase } from "../../modules/mongo/index.tx";
 import { jsonError } from "../core/responses.tx";
 import { AppState } from "../core/state.tx";
 import { loadAppState } from "../core/store.tx";
-import { handleLogin } from "../features/auth/handler.tx";
-import { handleEvents } from "../features/events/handler.tx";
-import { handleExternal } from "../features/external/handler.tx";
-import { handleOrdersCollection, handleOrderItem } from "../features/orders/handler.tx";
-import { handleProductsCollection, handleProductItem } from "../features/products/handler.tx";
-import { handleSummary } from "../features/reports/handler.tx";
-import { handleUsersCollection, handleUserItem } from "../features/users/handler.tx";
+import { handleAuthRoute } from "../features/auth/index.tx";
+import { handleEventsRoute } from "../features/events/routes.tx";
+import { handleExternalRoute } from "../features/external/index.tx";
+import { handleOrderRoute, handleOrdersRoute } from "../features/orders/routes.tx";
+import { handleProductRoute, handleProductsRoute } from "../features/products/routes.tx";
+import { handleReportsSummaryRoute } from "../features/reports/index.tx";
+import { handleUserRoute, handleUsersRoute } from "../features/users/routes.tx";
 
-function extractId(path: string, prefix: string): string {
-    return path.substring(prefix.length(), path.length());
+class RequestContext {
+    method: string;
+    path: string;
+    body: string;
+    storageName: string;
+    client: MongoDatabase;
+
+    constructor(method: string, path: string, body: string, storageName: string, client: MongoDatabase) {
+        this.method = method;
+        this.path = path;
+        this.body = body;
+        this.storageName = storageName;
+        this.client = client;
+    }
 }
 
-export function handleRequest(req: Request, storageName: string, client: MongoClient): Response {
-    let method: string = stableMethod(req);
-    let path: string = stablePath(req);
-    let body: string = stableBody(req);
+function createRequestContext(req: Request, storageName: string, client: MongoDatabase): RequestContext {
+    return new RequestContext(
+        stableMethod(req),
+        stablePath(req),
+        stableBody(req),
+        storageName,
+        client
+    );
+}
 
-    if (path == "/" || path == "") {
-        return createJsonResponse({
-            message: "Welcome to TejX REST API",
-            version: "1.0.0",
-            endpoints: [
-                "/health",
-                "/api/auth/login",
-                "/api/users",
-                "/api/products",
-                "/api/orders",
-                "/api/reports/summary",
-                "/api/events",
-                "/api/external"
-            ]
+function welcomeResponse(): Response {
+    return createJsonResponse({
+        message: "Welcome to TejX REST API",
+        version: "1.0.0",
+        endpoints: [
+            "/health",
+            "/api/auth/login",
+            "/api/users",
+            "/api/products",
+            "/api/orders",
+            "/api/reports/summary",
+            "/api/events",
+            "/api/external"
+        ]
+    }, 200);
+}
 
-        }, 200);
+function exactPath(path: string, target: string): bool {
+    return path == target || path == target + "/";
+}
+
+function resourceId(path: string, prefix: string): Optional<string> {
+    if (!path.startsWith(prefix)) {
+        return None;
     }
 
-    if (path == "/api/external") {
-        return handleExternal(method);
+    let id: string = path.substring(prefix.length(), path.length());
+    if (id == "") {
+        return None;
     }
 
-    let state: AppState = loadAppState(client);
+    return id;
+}
 
-    if (path == "/health") {
-        return handleSummary(method, storageName, state);
+function handlePublicRoutes(ctx: RequestContext): Optional<Response> {
+    if (ctx.path == "/" || ctx.path == "") {
+        return welcomeResponse();
     }
 
-    if (path == "/api/auth/login") {
-        return handleLogin(method, body, state);
+    if (ctx.path == "/api/external") {
+        return handleExternalRoute(ctx.method);
     }
 
-    if (path == "/api/users" || path == "/api/users/") {
-        return handleUsersCollection(method, body, state);
+    return None;
+}
+
+function handleUserRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
+    if (exactPath(ctx.path, "/api/users")) {
+        return handleUsersRoute(ctx.method, ctx.body, state);
     }
 
-    if (path.startsWith("/api/users/")) {
-        let userId: string = extractId(path, "/api/users/");
-        return handleUserItem(method, body, state, userId);
+    let userId: Optional<string> = resourceId(ctx.path, "/api/users/");
+    if (userId != None) {
+        return handleUserRoute(ctx.method, ctx.body, state, userId as string);
     }
 
-    if (path == "/api/products" || path == "/api/products/") {
-        return handleProductsCollection(method, body, state);
+    return None;
+}
+
+function handleProductRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
+    if (exactPath(ctx.path, "/api/products")) {
+        return handleProductsRoute(ctx.method, ctx.body, state);
     }
 
-    if (path.startsWith("/api/products/")) {
-        let productId: string = extractId(path, "/api/products/");
-        return handleProductItem(method, body, state, productId);
+    let productId: Optional<string> = resourceId(ctx.path, "/api/products/");
+    if (productId != None) {
+        return handleProductRoute(ctx.method, ctx.body, state, productId as string);
     }
 
-    if (path == "/api/orders" || path == "/api/orders/") {
-        return handleOrdersCollection(method, body, state);
+    return None;
+}
+
+function handleOrderRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
+    if (exactPath(ctx.path, "/api/orders")) {
+        return handleOrdersRoute(ctx.method, ctx.body, state);
     }
 
-    if (path.startsWith("/api/orders/")) {
-        let orderId: string = extractId(path, "/api/orders/");
-        return handleOrderItem(method, body, state, orderId);
+    let orderId: Optional<string> = resourceId(ctx.path, "/api/orders/");
+    if (orderId != None) {
+        return handleOrderRoute(ctx.method, ctx.body, state, orderId as string);
     }
 
-    if (path == "/api/reports/summary") {
-        return handleSummary(method, storageName, state);
+    return None;
+}
+
+function handleStateRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
+    if (ctx.path == "/health" || ctx.path == "/api/reports/summary") {
+        return handleReportsSummaryRoute(ctx.method, ctx.storageName, state);
     }
 
-    if (path == "/api/events") {
-        return handleEvents(method, state);
+    if (ctx.path == "/api/auth/login") {
+        return handleAuthRoute(ctx.method, ctx.body, state);
     }
 
-    if (path.startsWith("/api/search")) {
+    let userResponse: Optional<Response> = handleUserRoutes(ctx, state);
+    if (userResponse != None) {
+        return userResponse as Response;
+    }
+
+    let productResponse: Optional<Response> = handleProductRoutes(ctx, state);
+    if (productResponse != None) {
+        return productResponse as Response;
+    }
+
+    let orderResponse: Optional<Response> = handleOrderRoutes(ctx, state);
+    if (orderResponse != None) {
+        return orderResponse as Response;
+    }
+
+    if (ctx.path == "/api/events") {
+        return handleEventsRoute(ctx.method, state);
+    }
+
+    if (ctx.path.startsWith("/api/search")) {
         return jsonError("Search not implemented in this version", 501);
     }
 
+    return None;
+}
+
+export function dispatchRequest(ctx: RequestContext): Response {
+    let publicResponse: Optional<Response> = handlePublicRoutes(ctx);
+    if (publicResponse != None) {
+        return publicResponse as Response;
+    }
+
+    let state: AppState = loadAppState(ctx.client);
+    let stateResponse: Optional<Response> = handleStateRoutes(ctx, state);
+    if (stateResponse != None) {
+        return stateResponse as Response;
+    }
+
     return jsonError("Route not found", 404);
+}
+
+export function handleRequest(req: Request, storageName: string, client: MongoDatabase): Response {
+    return dispatchRequest(createRequestContext(req, storageName, client));
+}
+
+export function createAppHandler(storageName: string, client: MongoDatabase): (req: Request) => Response {
+    return (req: Request) => handleRequest(req, storageName, client);
 }

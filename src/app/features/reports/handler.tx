@@ -1,48 +1,18 @@
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
-import { metaToDocument } from "../meta/model.tx";
-import { AppOrder } from "../orders/model.tx";
-import { AppProduct, productToView } from "../products/model.tx";
+import { toMetaView } from "../meta/index.tx";
+import { totalRevenue } from "../orders/index.tx";
+import { lowStockProductsView } from "../products/index.tx";
 
 function databaseSummary(state: AppState): any {
-    let revenue: float = 0.0;
-    let lowStockIds: string[] = [];
-    let lowStockItems: any = {};
-
-    for (let i: int = 0; i < state.orders.ids.length(); i++) {
-        let orderId: string = state.orders.ids[i];
-        let orderValue: Optional<AppOrder> = state.orders.items.get(orderId);
-        if (orderValue != None) {
-            revenue = revenue + (orderValue as AppOrder).total;
-        }
-    }
-
-    for (let i: int = 0; i < state.products.ids.length(); i++) {
-        let productId: string = state.products.ids[i];
-        let productValue: Optional<AppProduct> = state.products.items.get(productId);
-        if (productValue == None) {
-            continue;
-        }
-
-        let product: AppProduct = productValue as AppProduct;
-        if (product.stock < 10) {
-            lowStockIds.push(productId);
-            lowStockItems[productId] = productToView(product);
-        }
-    }
-
     return {
         users: state.users.ids.length(),
         products: state.products.ids.length(),
         orders: state.orders.ids.length(),
         events: state.events.ids.length(),
-        revenue: revenue,
-        lowStock: {
-            count: lowStockIds.length(),
-            ids: lowStockIds,
-            items: lowStockItems
-        }
+        revenue: totalRevenue(state.orders),
+        lowStock: lowStockProductsView(state.products)
     };
 }
 
@@ -52,7 +22,7 @@ export function handleSummary(method: string, storageName: string, state: AppSta
     }
 
     return createJsonResponse({
-        database: metaToDocument(state.meta),
+        database: toMetaView(state.meta),
         summary: databaseSummary(state),
         storage: storageName
     }, 200);

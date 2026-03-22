@@ -1,0 +1,11 @@
+import { Response } from "../../../modules/server/index.tx";
+import { AppState } from "../../core/state.tx";
+import { handleUsersCollection, handleUserItem } from "./handler.tx";
+
+export function handleUsersRoute(method: string, body: string, state: AppState): Response {
+    return handleUsersCollection(method, body, state);
+}
+
+export function handleUserRoute(method: string, body: string, state: AppState, userId: string): Response {
+    return handleUserItem(method, body, state, userId);
+}

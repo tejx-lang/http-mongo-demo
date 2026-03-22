@@ -1,8 +1,8 @@
 import { cloneWithoutMongoFields, deleteDocument, insertDocument, updateDocument } from "../../core/persistence.tx";
-import { MongoClient } from "../../../modules/mongo/client.tx";
+import { MongoDatabase } from "../../../modules/mongo/index.tx";
 import { AppUser, UserCollection, userFromDocument, userToDocument } from "./model.tx";
 
-export function loadUsers(client: MongoClient): UserCollection {
+export function loadUsers(client: MongoDatabase): UserCollection {
     let users = new UserCollection();
     let documents: any[] = client.find("users", {});
 
@@ -48,14 +48,14 @@ export function userIndexByEmail(users: UserCollection, email: string): int {
     return -1;
 }
 
-export function insertUser(client: MongoClient, user: AppUser): void {
+export function insertUser(client: MongoDatabase, user: AppUser): void {
     insertDocument(client, "users", userToDocument(user));
 }
 
-export function updateUser(client: MongoClient, id: string, user: AppUser): void {
+export function updateUser(client: MongoDatabase, id: string, user: AppUser): void {
     updateDocument(client, "users", id, userToDocument(user));
 }
 
-export function deleteUser(client: MongoClient, id: string): void {
+export function deleteUser(client: MongoDatabase, id: string): void {
     deleteDocument(client, "users", id);
 }
