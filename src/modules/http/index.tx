@@ -2,10 +2,6 @@ import { parse, stringify } from "std:json";
 import { Map } from "std:collections";
 import { HttpClient, HttpClientResponse, copyHeaders, createHeaders, createJsonHeaders } from "./client.tx";
 
-let httpClient = new HttpClient("http", "80", false);
-let httpsClient = new HttpClient("https", "443", false);
-let httpsInsecureClient = new HttpClient("https", "443", true);
-
 export class HttpRequest {
     method: string;
     body: string;
@@ -92,14 +88,18 @@ function requestBody(config: any): string {
     return String(config["body"]);
 }
 
+function createProtocolClient(scheme: string, port: string, insecureTls: bool): HttpClient {
+    return new HttpClient(scheme, port, insecureTls);
+}
+
 function clientFor(url: string, config: any): HttpClient {
     if (url.startsWith("https://")) {
         if (requestInsecureTls(config)) {
-            return httpsInsecureClient;
+            return createProtocolClient("https", "443", true);
         }
-        return httpsClient;
+        return createProtocolClient("https", "443", false);
     }
-    return httpClient;
+    return createProtocolClient("http", "80", false);
 }
 
 function wrapResponse(response: HttpClientResponse): HttpResponse {

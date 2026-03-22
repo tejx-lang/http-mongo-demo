@@ -16,25 +16,153 @@ class RequestContext {
     path: string;
     body: string;
     storageName: string;
-    client: MongoDatabase;
+    database: MongoDatabase;
 
-    constructor(method: string, path: string, body: string, storageName: string, client: MongoDatabase) {
+    constructor(method: string, path: string, body: string, storageName: string, database: MongoDatabase) {
         this.method = method;
         this.path = path;
         this.body = body;
         this.storageName = storageName;
-        this.client = client;
+        this.database = database;
     }
 }
 
-function createRequestContext(req: Request, storageName: string, client: MongoDatabase): RequestContext {
-    return new RequestContext(
-        stableMethod(req),
-        stablePath(req),
-        stableBody(req),
-        storageName,
-        client
-    );
+class RouteDefinition {
+    name: string;
+    kind: string;
+    path: string;
+    methods: string[];
+
+    constructor(name: string, kind: string, path: string, methods: string[]) {
+        this.name = name;
+        this.kind = kind;
+        this.path = path;
+        this.methods = [];
+        for (let i: int = 0; i < methods.length(); i++) {
+            this.methods.push(methods[i]);
+        }
+    }
+}
+
+class RouteMatch {
+    route: RouteDefinition;
+    resourceId: string;
+
+    constructor(route: RouteDefinition, resourceId: string) {
+        this.route = route;
+        this.resourceId = resourceId;
+    }
+}
+
+function exactRoute(name: string, path: string, methods: string[]): RouteDefinition {
+    return new RouteDefinition(name, "exact", path, methods);
+}
+
+function collectionRoute(name: string, path: string, methods: string[]): RouteDefinition {
+    return exactRoute(name, path, methods);
+}
+
+function resourceRoute(name: string, prefix: string, methods: string[]): RouteDefinition {
+    return new RouteDefinition(name, "resource", prefix, methods);
+}
+
+function prefixRoute(name: string, prefix: string, methods: string[]): RouteDefinition {
+    return new RouteDefinition(name, "prefix", prefix, methods);
+}
+
+function publicRoutes(): RouteDefinition[] {
+    return [
+        exactRoute("home", "/", ["GET"]),
+        exactRoute("external", "/api/external", ["GET"])
+    ];
+}
+
+function stateRoutes(): RouteDefinition[] {
+    return [
+        exactRoute("health", "/health", ["GET"]),
+        exactRoute("summary", "/api/reports/summary", ["GET"]),
+        exactRoute("auth_login", "/api/auth/login", ["POST"]),
+        collectionRoute("users_collection", "/api/users", ["GET", "POST"]),
+        resourceRoute("user_item", "/api/users/", ["GET", "PUT", "DELETE"]),
+        collectionRoute("products_collection", "/api/products", ["GET", "POST"]),
+        resourceRoute("product_item", "/api/products/", ["GET", "PUT", "DELETE"]),
+        collectionRoute("orders_collection", "/api/orders", ["GET", "POST"]),
+        resourceRoute("order_item", "/api/orders/", ["GET", "PUT", "DELETE"]),
+        exactRoute("events", "/api/events", ["GET"]),
+        prefixRoute("search", "/api/search", ["GET"])
+    ];
+}
+
+function matchesExactPath(path: string, target: string): bool {
+    if (target == "/") {
+        return path == "/" || path == "";
+    }
+
+    return path == target || path == target + "/";
+}
+
+function matchesResourcePath(path: string, prefix: string): Optional<string> {
+    if (!path.startsWith(prefix)) {
+        return None;
+    }
+
+    let resourceId: string = path.substring(prefix.length(), path.length());
+    if (resourceId == "" || resourceId.indexOf("/") >= 0) {
+        return None;
+    }
+
+    return resourceId;
+}
+
+function matchRoute(route: RouteDefinition, path: string): Optional<RouteMatch> {
+    if (route.kind == "exact") {
+        if (matchesExactPath(path, route.path)) {
+            return new RouteMatch(route, "");
+        }
+        return None;
+    }
+
+    if (route.kind == "resource") {
+        let resourceId: Optional<string> = matchesResourcePath(path, route.path);
+        if (resourceId != None) {
+            return new RouteMatch(route, resourceId as string);
+        }
+        return None;
+    }
+
+    if (route.kind == "prefix" && path.startsWith(route.path)) {
+        return new RouteMatch(route, "");
+    }
+
+    return None;
+}
+
+function findRouteMatch(routes: RouteDefinition[], path: string): Optional<RouteMatch> {
+    for (let i: int = 0; i < routes.length(); i++) {
+        let matchValue: Optional<RouteMatch> = matchRoute(routes[i], path);
+        if (matchValue != None) {
+            return matchValue as RouteMatch;
+        }
+    }
+
+    return None;
+}
+
+function methodAllowed(route: RouteDefinition, method: string): bool {
+    for (let i: int = 0; i < route.methods.length(); i++) {
+        if (route.methods[i] == method) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function methodNotAllowed(route: RouteDefinition): Response {
+    return createJsonResponse({
+        error: "Method not allowed",
+        allowed: route.methods
+    }, 405);
 }
 
 function welcomeResponse(): Response {
@@ -54,117 +182,98 @@ function welcomeResponse(): Response {
     }, 200);
 }
 
-function exactPath(path: string, target: string): bool {
-    return path == target || path == target + "/";
-}
-
-function resourceId(path: string, prefix: string): Optional<string> {
-    if (!path.startsWith(prefix)) {
-        return None;
-    }
-
-    let id: string = path.substring(prefix.length(), path.length());
-    if (id == "") {
-        return None;
-    }
-
-    return id;
-}
-
-function handlePublicRoutes(ctx: RequestContext): Optional<Response> {
-    if (ctx.path == "/" || ctx.path == "") {
+function runPublicRoute(match: RouteMatch, ctx: RequestContext): Response {
+    if (match.route.name == "home") {
         return welcomeResponse();
     }
 
-    if (ctx.path == "/api/external") {
+    if (match.route.name == "external") {
         return handleExternalRoute(ctx.method);
     }
 
-    return None;
+    return jsonError("Route not found", 404);
 }
 
-function handleUserRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
-    if (exactPath(ctx.path, "/api/users")) {
-        return handleUsersRoute(ctx.method, ctx.body, state);
-    }
-
-    let userId: Optional<string> = resourceId(ctx.path, "/api/users/");
-    if (userId != None) {
-        return handleUserRoute(ctx.method, ctx.body, state, userId as string);
-    }
-
-    return None;
-}
-
-function handleProductRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
-    if (exactPath(ctx.path, "/api/products")) {
-        return handleProductsRoute(ctx.method, ctx.body, state);
-    }
-
-    let productId: Optional<string> = resourceId(ctx.path, "/api/products/");
-    if (productId != None) {
-        return handleProductRoute(ctx.method, ctx.body, state, productId as string);
-    }
-
-    return None;
-}
-
-function handleOrderRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
-    if (exactPath(ctx.path, "/api/orders")) {
-        return handleOrdersRoute(ctx.method, ctx.body, state);
-    }
-
-    let orderId: Optional<string> = resourceId(ctx.path, "/api/orders/");
-    if (orderId != None) {
-        return handleOrderRoute(ctx.method, ctx.body, state, orderId as string);
-    }
-
-    return None;
-}
-
-function handleStateRoutes(ctx: RequestContext, state: AppState): Optional<Response> {
-    if (ctx.path == "/health" || ctx.path == "/api/reports/summary") {
+function runStateRoute(match: RouteMatch, ctx: RequestContext, state: AppState): Response {
+    if (match.route.name == "health" || match.route.name == "summary") {
         return handleReportsSummaryRoute(ctx.method, ctx.storageName, state);
     }
 
-    if (ctx.path == "/api/auth/login") {
+    if (match.route.name == "auth_login") {
         return handleAuthRoute(ctx.method, ctx.body, state);
     }
 
-    let userResponse: Optional<Response> = handleUserRoutes(ctx, state);
-    if (userResponse != None) {
-        return userResponse as Response;
+    if (match.route.name == "users_collection") {
+        return handleUsersRoute(ctx.method, ctx.body, state);
     }
 
-    let productResponse: Optional<Response> = handleProductRoutes(ctx, state);
-    if (productResponse != None) {
-        return productResponse as Response;
+    if (match.route.name == "user_item") {
+        return handleUserRoute(ctx.method, ctx.body, state, match.resourceId);
     }
 
-    let orderResponse: Optional<Response> = handleOrderRoutes(ctx, state);
-    if (orderResponse != None) {
-        return orderResponse as Response;
+    if (match.route.name == "products_collection") {
+        return handleProductsRoute(ctx.method, ctx.body, state);
     }
 
-    if (ctx.path == "/api/events") {
+    if (match.route.name == "product_item") {
+        return handleProductRoute(ctx.method, ctx.body, state, match.resourceId);
+    }
+
+    if (match.route.name == "orders_collection") {
+        return handleOrdersRoute(ctx.method, ctx.body, state);
+    }
+
+    if (match.route.name == "order_item") {
+        return handleOrderRoute(ctx.method, ctx.body, state, match.resourceId);
+    }
+
+    if (match.route.name == "events") {
         return handleEventsRoute(ctx.method, state);
     }
 
-    if (ctx.path.startsWith("/api/search")) {
+    if (match.route.name == "search") {
         return jsonError("Search not implemented in this version", 501);
     }
 
-    return None;
+    return jsonError("Route not found", 404);
+}
+
+function dispatchPublicRoutes(ctx: RequestContext): Optional<Response> {
+    let matchValue: Optional<RouteMatch> = findRouteMatch(publicRoutes(), ctx.path);
+    if (matchValue == None) {
+        return None;
+    }
+
+    let match: RouteMatch = matchValue as RouteMatch;
+    if (!methodAllowed(match.route, ctx.method)) {
+        return methodNotAllowed(match.route);
+    }
+
+    return runPublicRoute(match, ctx);
+}
+
+function dispatchStateRoutes(ctx: RequestContext): Optional<Response> {
+    let matchValue: Optional<RouteMatch> = findRouteMatch(stateRoutes(), ctx.path);
+    if (matchValue == None) {
+        return None;
+    }
+
+    let match: RouteMatch = matchValue as RouteMatch;
+    if (!methodAllowed(match.route, ctx.method)) {
+        return methodNotAllowed(match.route);
+    }
+
+    let state: AppState = loadAppState(ctx.database);
+    return runStateRoute(match, ctx, state);
 }
 
 export function dispatchRequest(ctx: RequestContext): Response {
-    let publicResponse: Optional<Response> = handlePublicRoutes(ctx);
+    let publicResponse: Optional<Response> = dispatchPublicRoutes(ctx);
     if (publicResponse != None) {
         return publicResponse as Response;
     }
 
-    let state: AppState = loadAppState(ctx.client);
-    let stateResponse: Optional<Response> = handleStateRoutes(ctx, state);
+    let stateResponse: Optional<Response> = dispatchStateRoutes(ctx);
     if (stateResponse != None) {
         return stateResponse as Response;
     }
@@ -172,10 +281,16 @@ export function dispatchRequest(ctx: RequestContext): Response {
     return jsonError("Route not found", 404);
 }
 
-export function handleRequest(req: Request, storageName: string, client: MongoDatabase): Response {
-    return dispatchRequest(createRequestContext(req, storageName, client));
+export function handleRequest(req: Request, storageName: string, database: MongoDatabase): Response {
+    return dispatchRequest(new RequestContext(
+        stableMethod(req),
+        stablePath(req),
+        stableBody(req),
+        storageName,
+        database
+    ));
 }
 
-export function createAppHandler(storageName: string, client: MongoDatabase): (req: Request) => Response {
-    return (req: Request) => handleRequest(req, storageName, client);
+export function createAppHandler(storageName: string, database: MongoDatabase): (req: Request) => Response {
+    return (req: Request) => handleRequest(req, storageName, database);
 }

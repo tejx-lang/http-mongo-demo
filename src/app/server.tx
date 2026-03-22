@@ -1,51 +1,106 @@
-import { resolvePort, resolveBaseUrl, resolveMongoConnection, resolveMongoStorageName } from "./config/env.tx";
-import { configureDatabaseConnection } from "./core/persistence.tx";
+import std:binary;
+import { resolvePort, resolveBaseUrl, resolveMongoConnection } from "./config/env.tx";
 import { ensureAppState } from "./core/store.tx";
 import { MongoConnection, MongoDatabase, connectMongo } from "../modules/mongo/index.tx";
 import { describeError } from "../modules/errors/index.tx";
 import { Server } from "../modules/server/index.tx";
 import { createAppHandler } from "./router/index.tx";
 
-class ApplicationRuntime {
-    client: MongoDatabase;
+class ApplicationSettings {
+    host: string;
     port: string;
     baseUrl: string;
     storageName: string;
-
-    constructor(client: MongoDatabase, port: string, baseUrl: string, storageName: string) {
-        this.client = client;
+    
+    constructor(host: string, port: string, baseUrl: string, storageName: string) {
+        this.host = host;
         this.port = port;
         this.baseUrl = baseUrl;
         this.storageName = storageName;
     }
+    
+    address(): string {
+        return this.host + ":" + this.port;
+    }
 }
 
-function createApplicationRuntime(): ApplicationRuntime {
-    let mongoConnection: MongoConnection = resolveMongoConnection();
-    configureDatabaseConnection(mongoConnection);
+class ApplicationRuntime {
+    settings: ApplicationSettings;
+    database: MongoDatabase;
+    
+    constructor(settings: ApplicationSettings, database: MongoDatabase) {
+        this.settings = settings;
+        this.database = database;
+    }
+}
 
-    let client: MongoDatabase = connectMongo(mongoConnection);
-    ensureAppState(client);
+function atSign(): string {
+    return binary.toString([64]);
+}
 
+function describeStorage(connection: MongoConnection): string {
+    let out: string = "mongodb://";
+
+    if (connection.username != "") {
+        out = out + connection.username;
+        if (connection.password != "") {
+            out = out + ":***";
+        }
+        out = out + atSign();
+    }
+
+    out = out + connection.host + ":" + String(connection.port);
+    out = out + "/" + connection.database;
+
+    let queryParts: string[] = [];
+    if (connection.authDatabase != "") {
+        queryParts.push("authSource=" + connection.authDatabase);
+    }
+    if (connection.replicaSet != "") {
+        queryParts.push("replicaSet=" + connection.replicaSet);
+    }
+    if (queryParts.length() > 0) {
+        out = out + "?" + queryParts.join("&");
+    }
+
+    return out;
+}
+
+function resolveApplicationSettings(connection: MongoConnection): ApplicationSettings {
+    let host: string = "127.0.0.1";
     let port: string = resolvePort();
-    return new ApplicationRuntime(
-        client,
+    
+    return new ApplicationSettings(
+        host,
         port,
         resolveBaseUrl(port),
-        resolveMongoStorageName()
+        describeStorage(connection)
     );
 }
 
+function createApplicationDatabase(connection: MongoConnection): MongoDatabase {
+    let database: MongoDatabase = connectMongo(connection);
+    ensureAppState(database);
+    return database;
+}
+
+function createApplicationRuntime(): ApplicationRuntime {
+    let connection: MongoConnection = resolveMongoConnection();
+    let settings: ApplicationSettings = resolveApplicationSettings(connection);
+    let database: MongoDatabase = createApplicationDatabase(connection);
+    return new ApplicationRuntime(settings, database);
+}
+
 function logStartup(runtime: ApplicationRuntime): void {
-    print("Starting TejX multi-API server on port ", runtime.port);
-    print("Storage: ", runtime.storageName);
-    print("Server started at ", runtime.baseUrl);
+    print("Starting TejX multi-API server on port ", runtime.settings.port);
+    print("Storage: ", runtime.settings.storageName);
+    print("Server started at ", runtime.settings.baseUrl);
     print("Try: GET /health, GET /api/users, GET /api/products, GET /api/orders, GET /api/reports/summary");
 }
 
 function startApplicationServer(runtime: ApplicationRuntime): void {
     let server = new Server();
-    server.listen("127.0.0.1:" + runtime.port, createAppHandler(runtime.storageName, runtime.client));
+    server.listen(runtime.settings.address(), createAppHandler(runtime.settings.storageName, runtime.database));
 }
 
 export function runApplication(): void {
