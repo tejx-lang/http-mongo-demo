@@ -1,21 +1,21 @@
-import { Request, Response, createJsonResponse, stableMethod, stablePath, stableBody } from "../../modules/server/index.tx";
-import { loadDatabase } from "../services/database.tx";
-import { DatabaseSnapshot } from "../models/domain.tx";
-import { handleUsersCollection, handleUserItem } from "../controllers/userController.tx";
-import { handleProductsCollection, handleProductItem } from "../controllers/productController.tx";
-import { handleOrdersCollection, handleOrderItem } from "../controllers/orderController.tx";
-import { handleLogin } from "../controllers/authController.tx";
-import { handleSummary, handleEvents } from "../controllers/reportController.tx";
-
-function jsonError(message: string, status: int): Response {
-    return createJsonResponse({ error: message }, status);
-}
+import { Request, Response, createJsonResponse, stableBody, stableMethod, stablePath } from "../../modules/server/index.tx";
+import { MongoClient } from "../../modules/mongo/client.tx";
+import { jsonError } from "../core/responses.tx";
+import { AppState } from "../core/state.tx";
+import { loadAppState } from "../core/store.tx";
+import { handleLogin } from "../features/auth/handler.tx";
+import { handleEvents } from "../features/events/handler.tx";
+import { handleExternal } from "../features/external/handler.tx";
+import { handleOrdersCollection, handleOrderItem } from "../features/orders/handler.tx";
+import { handleProductsCollection, handleProductItem } from "../features/products/handler.tx";
+import { handleSummary } from "../features/reports/handler.tx";
+import { handleUsersCollection, handleUserItem } from "../features/users/handler.tx";
 
 function extractId(path: string, prefix: string): string {
     return path.substring(prefix.length(), path.length());
 }
 
-export function handleRequest(req: Request, storageName: string): Response {
+export function handleRequest(req: Request, storageName: string, client: MongoClient): Response {
     let method: string = stableMethod(req);
     let path: string = stablePath(req);
     let body: string = stableBody(req);
@@ -31,58 +31,63 @@ export function handleRequest(req: Request, storageName: string): Response {
                 "/api/products",
                 "/api/orders",
                 "/api/reports/summary",
-                "/api/events"
+                "/api/events",
+                "/api/external"
             ]
+
         }, 200);
     }
 
-    let db: DatabaseSnapshot = loadDatabase();
+    if (path == "/api/external") {
+        return handleExternal(method);
+    }
+
+    let state: AppState = loadAppState(client);
 
     if (path == "/health") {
-        return handleSummary(method, storageName, db);
+        return handleSummary(method, storageName, state);
     }
 
     if (path == "/api/auth/login") {
-        return handleLogin(method, body, db);
+        return handleLogin(method, body, state);
     }
 
     if (path == "/api/users" || path == "/api/users/") {
-        return handleUsersCollection(method, body, db);
+        return handleUsersCollection(method, body, state);
     }
 
     if (path.startsWith("/api/users/")) {
         let userId: string = extractId(path, "/api/users/");
-        return handleUserItem(method, body, db, userId);
+        return handleUserItem(method, body, state, userId);
     }
 
     if (path == "/api/products" || path == "/api/products/") {
-        return handleProductsCollection(method, body, db);
+        return handleProductsCollection(method, body, state);
     }
 
     if (path.startsWith("/api/products/")) {
         let productId: string = extractId(path, "/api/products/");
-        return handleProductItem(method, body, db, productId);
+        return handleProductItem(method, body, state, productId);
     }
 
     if (path == "/api/orders" || path == "/api/orders/") {
-        return handleOrdersCollection(method, body, db);
+        return handleOrdersCollection(method, body, state);
     }
 
     if (path.startsWith("/api/orders/")) {
         let orderId: string = extractId(path, "/api/orders/");
-        return handleOrderItem(method, body, db, orderId);
+        return handleOrderItem(method, body, state, orderId);
     }
 
     if (path == "/api/reports/summary") {
-        return handleSummary(method, storageName, db);
+        return handleSummary(method, storageName, state);
     }
 
     if (path == "/api/events") {
-        return handleEvents(method, db);
+        return handleEvents(method, state);
     }
 
     if (path.startsWith("/api/search")) {
-        // Implement search in a separate controller or here
         return jsonError("Search not implemented in this version", 501);
     }
 

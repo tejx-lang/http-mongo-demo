@@ -1,0 +1,30 @@
+import { resolveMongoDatabase } from "../../config/env.tx";
+import { cloneWithoutMongoFields, upsertDocument } from "../../core/persistence.tx";
+import { MongoClient } from "../../../modules/mongo/client.tx";
+import { AppMeta, createDefaultAppMeta, metaFromDocument, metaToDocument } from "./model.tx";
+
+let META_COLLECTION: string = "app_meta";
+let META_ID: string = "app-meta";
+
+export function ensureMeta(client: MongoClient): void {
+    let document: any = client.findOne(META_COLLECTION, { "_id": META_ID });
+    if (document == None) {
+        let meta: AppMeta = createDefaultAppMeta(resolveMongoDatabase());
+        upsertDocument(client, META_COLLECTION, { "_id": META_ID }, metaToDocument(meta));
+    }
+}
+
+export function loadMeta(client: MongoClient): AppMeta {
+    let document: any = client.findOne(META_COLLECTION, { "_id": META_ID });
+    if (document == None) {
+        let meta: AppMeta = createDefaultAppMeta(resolveMongoDatabase());
+        upsertDocument(client, META_COLLECTION, { "_id": META_ID }, metaToDocument(meta));
+        return meta;
+    }
+
+    return metaFromDocument(cloneWithoutMongoFields(document));
+}
+
+export function saveMeta(client: MongoClient, meta: AppMeta): void {
+    upsertDocument(client, META_COLLECTION, { "_id": META_ID }, metaToDocument(meta));
+}

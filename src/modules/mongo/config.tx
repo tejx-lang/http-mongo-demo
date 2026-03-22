@@ -1,0 +1,43 @@
+export class MongoConnectionConfig {
+    uri: string;
+    host: string;
+    port: int;
+    database: string;
+    username: string;
+    password: string;
+    authDatabase: string;
+    replicaSet: string;
+
+    constructor(
+        uri: string,
+        host: string,
+        port: int,
+        database: string,
+        username: string,
+        password: string,
+        authDatabase: string,
+        replicaSet: string
+    ) {
+        this.uri = uri;
+        this.host = host;
+        this.port = port;
+        this.database = database;
+        this.username = username;
+        this.password = password;
+        this.authDatabase = authDatabase;
+        this.replicaSet = replicaSet;
+    }
+}
+
+export function cloneConnectionConfig(connection: MongoConnectionConfig): MongoConnectionConfig {
+    return new MongoConnectionConfig(
+        connection.uri,
+        connection.host,
+        connection.port,
+        connection.database,
+        connection.username,
+        connection.password,
+        connection.authDatabase,
+        connection.replicaSet
+    );
+}

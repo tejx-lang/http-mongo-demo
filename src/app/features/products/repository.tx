@@ -1,0 +1,37 @@
+import { cloneWithoutMongoFields, deleteDocument, insertDocument, updateDocument } from "../../core/persistence.tx";
+import { MongoClient } from "../../../modules/mongo/client.tx";
+import { AppProduct, ProductCollection, productFromDocument, productToDocument } from "./model.tx";
+
+export function loadProducts(client: MongoClient): ProductCollection {
+    let products = new ProductCollection();
+    let documents: any[] = client.find("products", {});
+
+    for (let i: int = 0; i < documents.length(); i++) {
+        let productValue: Optional<AppProduct> = productFromDocument(cloneWithoutMongoFields(documents[i]));
+        if (productValue == None) {
+            continue;
+        }
+
+        let product: AppProduct = productValue as AppProduct;
+        products.ids.push(product.id);
+        products.items.set(product.id, product);
+    }
+
+    return products;
+}
+
+export function getProduct(products: ProductCollection, id: string): Optional<AppProduct> {
+    return products.items.get(id);
+}
+
+export function insertProduct(client: MongoClient, product: AppProduct): void {
+    insertDocument(client, "products", productToDocument(product));
+}
+
+export function updateProduct(client: MongoClient, id: string, product: AppProduct): void {
+    updateDocument(client, "products", id, productToDocument(product));
+}
+
+export function deleteProduct(client: MongoClient, id: string): void {
+    deleteDocument(client, "products", id);
+}

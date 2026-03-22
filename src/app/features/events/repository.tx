@@ -1,0 +1,25 @@
+import { cloneWithoutMongoFields, insertDocument } from "../../core/persistence.tx";
+import { MongoClient } from "../../../modules/mongo/client.tx";
+import { AppEvent, EventCollection, eventFromDocument, eventToDocument } from "./model.tx";
+
+export function loadEvents(client: MongoClient): EventCollection {
+    let events = new EventCollection();
+    let documents: any[] = client.find("events", {});
+
+    for (let i: int = 0; i < documents.length(); i++) {
+        let eventValue: Optional<AppEvent> = eventFromDocument(cloneWithoutMongoFields(documents[i]));
+        if (eventValue == None) {
+            continue;
+        }
+
+        let event: AppEvent = eventValue as AppEvent;
+        events.ids.push(event.id);
+        events.items.set(event.id, event);
+    }
+
+    return events;
+}
+
+export function insertEvent(client: MongoClient, event: AppEvent): void {
+    insertDocument(client, "events", eventToDocument(event));
+}

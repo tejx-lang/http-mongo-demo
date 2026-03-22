@@ -21,13 +21,18 @@ A modular TejX REST API demo with:
 │   ├── app/
 │   │   ├── config/
 │   │   │   └── env.tx
-│   │   ├── controllers/
-│   │   ├── models/
-│   │   │   └── domain.tx
+│   │   ├── core/
+│   │   ├── features/
+│   │   │   ├── auth/
+│   │   │   ├── events/
+│   │   │   ├── external/
+│   │   │   ├── meta/
+│   │   │   ├── orders/
+│   │   │   ├── products/
+│   │   │   ├── reports/
+│   │   │   └── users/
 │   │   ├── router/
 │   │   │   └── index.tx
-│   │   ├── services/
-│   │   │   └── database.tx
 │   │   └── server.tx
 │   ├── main.tx
 │   ├── modules/
@@ -40,7 +45,8 @@ A modular TejX REST API demo with:
 
 Structure rules:
 - `src/modules/` contains reusable generic building blocks.
-- `src/app/` contains rental-app-specific code only.
+- `src/app/core/` contains app runtime and persistence wiring.
+- `src/app/features/` contains feature-local handlers, types, and repositories.
 - `src/main.tx` stays thin and only starts the application.
 
 ## Getting Started
@@ -117,6 +123,7 @@ Supported request config fields:
 - `DELETE /api/orders/:id`
 - `GET /api/reports/summary`
 - `GET /api/events`
+- `GET /api/external`
 
 ## Configuration
 
@@ -142,4 +149,5 @@ Supported environment variables:
 
 - The app is Mongo-only now; old file-backed storage and seed flow were removed.
 - The database bootstrap creates or refreshes the `app_meta` document as needed.
+- Feature code now lives beside its own types and repository logic under `src/app/features/`.
 - `mongo_probe` is the quickest way to confirm direct Mongo connectivity and auth.

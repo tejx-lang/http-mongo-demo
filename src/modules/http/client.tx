@@ -396,7 +396,7 @@ export class HttpClient {
             throw new Error("Failed to write request to " + parsedUrl.host);
         }
 
-        let rawResponse: string = stream.readAll();
+        let rawResponse: string = readRawResponse(stream);
         stream.close();
         if (rawResponse == "") {
             throw new Error("Empty response from " + parsedUrl.host);

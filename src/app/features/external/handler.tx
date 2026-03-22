@@ -1,0 +1,19 @@
+import { fetch } from "../../../modules/http/index.tx";
+import { describeError } from "../../../modules/errors/index.tx";
+import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+
+export function handleExternal(method: string): Response {
+    if (method != "GET") {
+        return createJsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    try {
+        let response = fetch("https://dummyjson.com/products/1");
+        return createJsonResponse(response.json(), response.status);
+    } catch (error) {
+        return createJsonResponse({
+            error: "External request failed",
+            detail: describeError(error)
+        }, 500);
+    }
+}

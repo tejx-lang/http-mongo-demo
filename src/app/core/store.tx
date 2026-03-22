@@ -1,0 +1,39 @@
+import { nowMs } from "std:time";
+import { nextEntityId } from "./ids.tx";
+import { AppState } from "./state.tx";
+import { MongoClient } from "../../modules/mongo/client.tx";
+import { AppEvent } from "../features/events/model.tx";
+import { insertEvent, loadEvents } from "../features/events/repository.tx";
+import { ensureMeta, loadMeta, saveMeta } from "../features/meta/repository.tx";
+import { loadOrders } from "../features/orders/repository.tx";
+import { loadProducts } from "../features/products/repository.tx";
+import { loadUsers } from "../features/users/repository.tx";
+
+export function ensureAppState(client: MongoClient): void {
+    ensureMeta(client);
+}
+
+export function loadAppState(client: MongoClient): AppState {
+    return new AppState(
+        client,
+        loadMeta(client),
+        loadUsers(client),
+        loadProducts(client),
+        loadOrders(client),
+        loadEvents(client)
+    );
+}
+
+export function touchAppState(state: AppState): void {
+    state.meta.updatedAt = nowMs();
+    saveMeta(state.client, state.meta);
+}
+
+export function recordAppEvent(state: AppState, action: string, entity: string, entityId: string): void {
+    let eventId: string = nextEntityId("event", state.events.ids);
+    let event = new AppEvent(eventId, action, entity, entityId, nowMs());
+
+    state.events.ids.push(eventId);
+    state.events.items.set(eventId, event);
+    insertEvent(state.client, event);
+}

@@ -1,11 +1,12 @@
 import { resolveMongoConnection } from "../../src/app/config/env.tx";
-import { configureDatabaseConnection, ensureDatabase, loadDatabase } from "../../src/app/services/database.tx";
-import { DatabaseSnapshot, MongoConnectionConfig } from "../../src/app/models/domain.tx";
+import { MongoClient } from "../../src/modules/mongo/client.tx";
+import { ensureAppState, loadAppState } from "../../src/app/core/store.tx";
+import { AppState } from "../../src/app/core/state.tx";
+import { MongoConnectionConfig } from "../../src/modules/mongo/config.tx";
 
 function main() {
     let connection: MongoConnectionConfig = resolveMongoConnection();
-
-    configureDatabaseConnection(connection);
+    let client = new MongoClient(connection);
 
     print("resolved_host=", connection.host);
     print("resolved_port=", connection.port);
@@ -15,9 +16,9 @@ function main() {
 
     try {
         print("probe_step=ensure_db");
-        ensureDatabase();
+        ensureAppState(client);
         print("probe_step=load_db");
-        let db: DatabaseSnapshot = loadDatabase();
+        let db: AppState = loadAppState(client);
         print("probe_meta_name=", db.meta.name);
         print("probe_users_count=", db.users.ids.length());
         print("probe_products_count=", db.products.ids.length());

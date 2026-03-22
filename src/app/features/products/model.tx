@@ -1,0 +1,75 @@
+import { Map } from "std:collections";
+import { floatValue, int64Value, intValue, stringValue } from "../../core/coerce.tx";
+
+export class AppProduct {
+    id: string;
+    name: string;
+    price: float;
+    stock: int;
+    category: string;
+    createdAt: int64;
+
+    constructor(id: string, name: string, price: float, stock: int, category: string, createdAt: int64) {
+        this.id = id;
+        this.name = name;
+        this.price = price;
+        this.stock = stock;
+        this.category = category;
+        this.createdAt = createdAt;
+    }
+}
+
+export class ProductPayload {
+    name: Optional<string>;
+    category: Optional<string>;
+    price: Optional<float>;
+    stock: Optional<int>;
+
+    constructor() {
+        this.name = None;
+        this.category = None;
+        this.price = None;
+        this.stock = None;
+    }
+}
+
+export class ProductCollection {
+    ids: string[];
+    items: Map<string, AppProduct>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppProduct>();
+    }
+}
+
+export function productToDocument(product: AppProduct): any {
+    return {
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        stock: product.stock,
+        category: product.category,
+        createdAt: product.createdAt
+    };
+}
+
+export function productFromDocument(document: any): Optional<AppProduct> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    return new AppProduct(
+        id,
+        stringValue(document["name"]),
+        floatValue(document["price"], 0.0),
+        intValue(document["stock"], 0),
+        stringValue(document["category"], "misc"),
+        int64Value(document["createdAt"], 0)
+    );
+}
+
+export function productToView(product: AppProduct): any {
+    return productToDocument(product);
+}

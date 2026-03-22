@@ -1,0 +1,201 @@
+import { stringify } from "std:json";
+
+function safeString(value: any): string {
+    try {
+        return String(value);
+    } catch (error) {
+        return "<String() failed>";
+    }
+}
+
+function safeJson(value: any): string {
+    try {
+        return stringify(value);
+    } catch (error) {
+        return "";
+    }
+}
+
+function readField(target: any, name: string): any {
+    try {
+        return target[name];
+    } catch (error) {
+        return None;
+    }
+}
+
+function append(parts: string[], label: string, value: string): void {
+    if (value.trim() == "") {
+        return;
+    }
+    parts.push(label + "=" + value);
+}
+
+function describeScalar(value: any): string {
+    let kind: string = typeof(value);
+    if (value == None) {
+        return "null";
+    }
+
+    if (kind == "string") {
+        return safeJson(value);
+    }
+
+    if (kind == "number" || kind == "boolean") {
+        return safeString(value);
+    }
+
+    let rendered: string = safeString(value);
+    if (rendered != "") {
+        return rendered;
+    }
+
+    return "<" + kind + ">";
+}
+
+function describeFunction(value: any): string {
+    let parts: string[] = [];
+    append(parts, "type", typeof(value));
+
+    let nameValue: any = readField(value, "name");
+    if (nameValue != None) {
+        append(parts, "name", safeString(nameValue));
+    }
+
+    let rendered: string = safeString(value);
+    if (rendered != "" && !rendered.startsWith("[object ")) {
+        append(parts, "value", rendered);
+    }
+
+    if (parts.length() == 1) {
+        parts.push("value=<function>");
+    }
+
+    return parts.join(" ");
+}
+
+function describeObject(value: any): string {
+    let parts: string[] = [];
+    append(parts, "type", typeof(value));
+
+    let rendered: string = safeString(value);
+    if (rendered != "" && !rendered.startsWith("[object ")) {
+        append(parts, "value", rendered);
+    } else if (rendered != "") {
+        append(parts, "string", rendered);
+    }
+
+    let fieldNames: string[] = [
+        "name",
+        "message",
+        "detail",
+        "reason",
+        "errmsg",
+        "error",
+        "code",
+        "status",
+        "statusText",
+        "stack"
+    ];
+
+    for (let i: int = 0; i < fieldNames.length(); i++) {
+        let fieldName: string = fieldNames[i];
+        let fieldValue: any = readField(value, fieldName);
+        if (fieldValue == None) {
+            continue;
+        }
+
+        if (typeof(fieldValue) == "object" || typeof(fieldValue) == "function") {
+            let serialized: string = safeJson(fieldValue);
+            if (serialized != "" && serialized != "{}") {
+                append(parts, fieldName, serialized);
+            } else {
+                append(parts, fieldName, safeString(fieldValue));
+            }
+        } else {
+            append(parts, fieldName, describeScalar(fieldValue));
+        }
+    }
+
+    let constructorValue: any = readField(value, "constructor");
+    if (constructorValue != None) {
+        let constructorName: any = readField(constructorValue, "name");
+        if (constructorName != None) {
+            append(parts, "constructor", safeString(constructorName));
+        } else {
+            let constructorText: string = safeString(constructorValue);
+            if (constructorText != "") {
+                append(parts, "constructor", constructorText);
+            }
+        }
+    }
+
+    let serialized: string = safeJson(value);
+    if (serialized != "") {
+        append(parts, "json", serialized);
+    }
+
+    let keys: string[] = Object.keys(value);
+    append(parts, "keys", safeJson(keys));
+
+    if (keys.length() > 0) {
+        let fieldPairs: string[] = [];
+        for (let i: int = 0; i < keys.length(); i++) {
+            let key: string = keys[i];
+            let item: any = readField(value, key);
+            let itemKind: string = typeof(item);
+            if (item == None) {
+                fieldPairs.push(key + "=null");
+                continue;
+            }
+
+            if (itemKind == "object") {
+                let itemJson: string = safeJson(item);
+                if (itemJson != "" && itemJson != "{}") {
+                    fieldPairs.push(key + "=" + itemJson);
+                } else {
+                    fieldPairs.push(key + "=" + safeString(item));
+                }
+                continue;
+            }
+
+            if (itemKind == "function") {
+                let functionName: any = readField(item, "name");
+                if (functionName != None) {
+                    fieldPairs.push(key + "=<function " + safeString(functionName) + ">");
+                } else {
+                    fieldPairs.push(key + "=<function>");
+                }
+                continue;
+            }
+
+            fieldPairs.push(key + "=" + describeScalar(item));
+        }
+
+        if (fieldPairs.length() > 0) {
+            append(parts, "fields", fieldPairs.join(", "));
+        }
+    }
+
+    if (parts.length() == 1) {
+        parts.push("value=<empty object>");
+    }
+
+    return parts.join(" ");
+}
+
+export function describeError(error: any): string {
+    if (error == None) {
+        return "type=null value=null";
+    }
+
+    let kind: string = typeof(error);
+    if (kind == "object") {
+        return describeObject(error);
+    }
+    if (kind == "function") {
+        return describeFunction(error);
+    }
+
+    return "type=" + kind + " value=" + describeScalar(error);
+}

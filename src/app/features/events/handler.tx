@@ -1,0 +1,15 @@
+import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+import { AppState, eventMap } from "../../core/state.tx";
+import { jsonError } from "../../core/responses.tx";
+
+export function handleEvents(method: string, state: AppState): Response {
+    if (method != "GET") {
+        return jsonError("Method not allowed", 405);
+    }
+
+    return createJsonResponse({
+        count: state.events.ids.length(),
+        ids: state.events.ids,
+        items: eventMap(state.events)
+    }, 200);
+}

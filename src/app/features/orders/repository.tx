@@ -1,0 +1,37 @@
+import { cloneWithoutMongoFields, deleteDocument, insertDocument, updateDocument } from "../../core/persistence.tx";
+import { MongoClient } from "../../../modules/mongo/client.tx";
+import { AppOrder, OrderCollection, orderFromDocument, orderToDocument } from "./model.tx";
+
+export function loadOrders(client: MongoClient): OrderCollection {
+    let orders = new OrderCollection();
+    let documents: any[] = client.find("orders", {});
+
+    for (let i: int = 0; i < documents.length(); i++) {
+        let orderValue: Optional<AppOrder> = orderFromDocument(cloneWithoutMongoFields(documents[i]));
+        if (orderValue == None) {
+            continue;
+        }
+
+        let order: AppOrder = orderValue as AppOrder;
+        orders.ids.push(order.id);
+        orders.items.set(order.id, order);
+    }
+
+    return orders;
+}
+
+export function getOrder(orders: OrderCollection, id: string): Optional<AppOrder> {
+    return orders.items.get(id);
+}
+
+export function insertOrder(client: MongoClient, order: AppOrder): void {
+    insertDocument(client, "orders", orderToDocument(order));
+}
+
+export function updateOrder(client: MongoClient, id: string, order: AppOrder): void {
+    updateDocument(client, "orders", id, orderToDocument(order));
+}
+
+export function deleteOrder(client: MongoClient, id: string): void {
+    deleteDocument(client, "orders", id);
+}

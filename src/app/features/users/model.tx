@@ -1,0 +1,105 @@
+import { Map } from "std:collections";
+import { int64Value, stringValue } from "../../core/coerce.tx";
+
+export class AppUser {
+    id: string;
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+    createdAt: int64;
+
+    constructor(id: string, name: string, email: string, password: string, role: string, createdAt: int64) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.password = password;
+        this.role = role;
+        this.createdAt = createdAt;
+    }
+}
+
+export class PublicUser {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    createdAt: int64;
+
+    constructor(id: string, name: string, email: string, role: string, createdAt: int64) {
+        this.id = id;
+        this.name = name;
+        this.email = email;
+        this.role = role;
+        this.createdAt = createdAt;
+    }
+}
+
+export class UserPayload {
+    name: Optional<string>;
+    email: Optional<string>;
+    password: Optional<string>;
+    role: Optional<string>;
+
+    constructor() {
+        this.name = None;
+        this.email = None;
+        this.password = None;
+        this.role = None;
+    }
+}
+
+export class UserCollection {
+    ids: string[];
+    items: Map<string, AppUser>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppUser>();
+    }
+}
+
+export function userToDocument(user: AppUser): any {
+    return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        password: user.password,
+        role: user.role,
+        createdAt: user.createdAt
+    };
+}
+
+export function userFromDocument(document: any): Optional<AppUser> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    return new AppUser(
+        id,
+        stringValue(document["name"]),
+        stringValue(document["email"]),
+        stringValue(document["password"]),
+        stringValue(document["role"], "customer"),
+        int64Value(document["createdAt"], 0)
+    );
+}
+
+export function toPublicUser(user: AppUser): PublicUser {
+    return new PublicUser(user.id, user.name, user.email, user.role, user.createdAt);
+}
+
+export function publicUserToDocument(user: PublicUser): any {
+    return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt
+    };
+}
+
+export function userToPublicDocument(user: AppUser): any {
+    return publicUserToDocument(toPublicUser(user));
+}

@@ -1,0 +1,53 @@
+import { nowMs } from "std:time";
+import { int64Value, intValue, stringValue } from "../../core/coerce.tx";
+
+export class AppMeta {
+    id: string;
+    name: string;
+    version: int;
+    updatedAt: int64;
+    storage: string;
+    database: string;
+
+    constructor(id: string, name: string, version: int, updatedAt: int64, storage: string, database: string) {
+        this.id = id;
+        this.name = name;
+        this.version = version;
+        this.updatedAt = updatedAt;
+        this.storage = storage;
+        this.database = database;
+    }
+}
+
+export function createDefaultAppMeta(database: string): AppMeta {
+    return new AppMeta(
+        "app-meta",
+        "tejx-runtime-state",
+        1,
+        nowMs(),
+        "mongodb",
+        database
+    );
+}
+
+export function metaToDocument(meta: AppMeta): any {
+    return {
+        id: meta.id,
+        name: meta.name,
+        version: meta.version,
+        updatedAt: meta.updatedAt,
+        storage: meta.storage,
+        database: meta.database
+    };
+}
+
+export function metaFromDocument(document: any): AppMeta {
+    return new AppMeta(
+        stringValue(document["id"] != None ? document["id"] : document["_id"], "app-meta"),
+        stringValue(document["name"], "tejx-runtime-state"),
+        intValue(document["version"], 1),
+        int64Value(document["updatedAt"], 0),
+        stringValue(document["storage"], "mongodb"),
+        stringValue(document["database"], "")
+    );
+}

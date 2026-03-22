@@ -1,0 +1,90 @@
+import { Map } from "std:collections";
+import { floatValue, int64Value, stringValue } from "../../core/coerce.tx";
+
+function cloneStrings(values: string[]): string[] {
+    let out: string[] = [];
+    for (let i: int = 0; i < values.length(); i++) {
+        out.push(values[i]);
+    }
+    return out;
+}
+
+export class AppOrder {
+    id: string;
+    userId: string;
+    productIds: string[];
+    total: float;
+    status: string;
+    createdAt: int64;
+
+    constructor(id: string, userId: string, productIds: string[], total: float, status: string, createdAt: int64) {
+        this.id = id;
+        this.userId = userId;
+        this.productIds = cloneStrings(productIds);
+        this.total = total;
+        this.status = status;
+        this.createdAt = createdAt;
+    }
+}
+
+export class OrderPayload {
+    userId: Optional<string>;
+    status: Optional<string>;
+    productIds: string[];
+
+    constructor() {
+        this.userId = None;
+        this.status = None;
+        this.productIds = [];
+    }
+}
+
+export class OrderCollection {
+    ids: string[];
+    items: Map<string, AppOrder>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppOrder>();
+    }
+}
+
+export function orderToDocument(order: AppOrder): any {
+    return {
+        id: order.id,
+        userId: order.userId,
+        productIds: cloneStrings(order.productIds),
+        total: order.total,
+        status: order.status,
+        createdAt: order.createdAt
+    };
+}
+
+export function orderFromDocument(document: any): Optional<AppOrder> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    let productIds: string[] = [];
+    let rawProductIds: any = document["productIds"];
+    if (rawProductIds != None) {
+        let values: any[] = rawProductIds as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            productIds.push(stringValue(values[i]));
+        }
+    }
+
+    return new AppOrder(
+        id,
+        stringValue(document["userId"]),
+        productIds,
+        floatValue(document["total"], 0.0),
+        stringValue(document["status"], "pending"),
+        int64Value(document["createdAt"], 0)
+    );
+}
+
+export function orderToView(order: AppOrder): any {
+    return orderToDocument(order);
+}

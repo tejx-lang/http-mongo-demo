@@ -1,0 +1,180 @@
+import { Map } from "std:collections";
+import { parse } from "std:json";
+import { nowMs } from "std:time";
+import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+import { findIdIndex, nextEntityId } from "../../core/ids.tx";
+import { jsonError } from "../../core/responses.tx";
+import { AppState } from "../../core/state.tx";
+import { recordAppEvent, touchAppState } from "../../core/store.tx";
+import { AppOrder } from "../orders/model.tx";
+import { AppUser, UserCollection, userToPublicDocument } from "./model.tx";
+import { deleteUser, getUser, insertUser, updateUser, userIndexByEmail } from "./repository.tx";
+
+function parseBody(body: string): any {
+    if (body.trim() == "") {
+        throw new Error("Request body is required");
+    }
+
+    return parse(body);
+}
+
+function usersPayload(users: UserCollection): any {
+    let safeItems: any = {};
+
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let userId: string = users.ids[i];
+        let userValue: Optional<AppUser> = getUser(users, userId);
+        if (userValue == None) {
+            continue;
+        }
+
+        safeItems[userId] = userToPublicDocument(userValue as AppUser);
+    }
+
+    return {
+        count: users.ids.length(),
+        ids: users.ids,
+        items: safeItems
+    };
+}
+
+function removeUserFromState(users: UserCollection, id: string): void {
+    let index: int = findIdIndex(users.ids, id);
+    if (index < 0) {
+        return;
+    }
+
+    let nextIds: string[] = [];
+    let nextItems = new Map<string, AppUser>();
+
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let userId: string = users.ids[i];
+        if (userId == id) {
+            continue;
+        }
+
+        let userValue: Optional<AppUser> = getUser(users, userId);
+        if (userValue != None) {
+            nextIds.push(userId);
+            nextItems.set(userId, userValue as AppUser);
+        }
+    }
+
+    users.ids = nextIds;
+    users.items = nextItems;
+}
+
+function hasOrders(state: AppState, userId: string): bool {
+    for (let i: int = 0; i < state.orders.ids.length(); i++) {
+        let orderId: string = state.orders.ids[i];
+        let orderValue: Optional<AppOrder> = state.orders.items.get(orderId);
+        if (orderValue != None && (orderValue as AppOrder).userId == userId) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+export function handleUsersCollection(method: string, body: string, state: AppState): Response {
+    let users: UserCollection = state.users;
+
+    if (method == "GET") {
+        return createJsonResponse(usersPayload(users), 200);
+    }
+
+    if (method == "POST") {
+        try {
+            let payload: any = parseBody(body);
+            if (payload["name"] == None || payload["email"] == None || payload["password"] == None) {
+                return jsonError("name, email and password are required", 400);
+            }
+
+            let name: string = String(payload["name"]);
+            let email: string = String(payload["email"]);
+            let password: string = String(payload["password"]);
+            if (userIndexByEmail(users, email) >= 0) {
+                return jsonError("User email already exists", 409);
+            }
+
+            let role: string = payload["role"] != None ? String(payload["role"]) : "customer";
+            let userId: string = nextEntityId("user", users.ids);
+            let user = new AppUser(
+                userId,
+                name,
+                email,
+                password,
+                role,
+                nowMs()
+            );
+
+            users.ids.push(userId);
+            users.items.set(userId, user);
+            insertUser(state.client, user);
+            recordAppEvent(state, "created", "user", userId);
+            touchAppState(state);
+            return createJsonResponse(userToPublicDocument(user), 201);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    return jsonError("Method not allowed", 405);
+}
+
+export function handleUserItem(method: string, body: string, state: AppState, userId: string): Response {
+    let userValue: Optional<AppUser> = getUser(state.users, userId);
+    if (userValue == None) {
+        return jsonError("User not found", 404);
+    }
+
+    let user: AppUser = userValue as AppUser;
+
+    if (method == "GET") {
+        return createJsonResponse(userToPublicDocument(user), 200);
+    }
+
+    if (method == "PUT") {
+        try {
+            let payload: any = parseBody(body);
+            if (payload["name"] != None) {
+                user.name = String(payload["name"]);
+            }
+            if (payload["email"] != None) {
+                let email: string = String(payload["email"]);
+                let otherIndex: int = userIndexByEmail(state.users, email);
+                if (otherIndex >= 0 && state.users.ids[otherIndex] != userId) {
+                    return jsonError("User email already exists", 409);
+                }
+                user.email = email;
+            }
+            if (payload["role"] != None) {
+                user.role = String(payload["role"]);
+            }
+            if (payload["password"] != None) {
+                user.password = String(payload["password"]);
+            }
+
+            updateUser(state.client, userId, user);
+            recordAppEvent(state, "updated", "user", userId);
+            touchAppState(state);
+            return createJsonResponse(userToPublicDocument(user), 200);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    if (method == "DELETE") {
+        if (hasOrders(state, userId)) {
+            return jsonError("User has orders and cannot be deleted", 409);
+        }
+
+        removeUserFromState(state.users, userId);
+        deleteUser(state.client, userId);
+        recordAppEvent(state, "deleted", "user", userId);
+        touchAppState(state);
+        return createJsonResponse({ deleted: true, id: userId }, 200);
+    }
+
+    return jsonError("Method not allowed", 405);
+}

@@ -1,0 +1,157 @@
+import { Map } from "std:collections";
+import { parse } from "std:json";
+import { nowMs } from "std:time";
+import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+import { findIdIndex, nextEntityId } from "../../core/ids.tx";
+import { jsonError } from "../../core/responses.tx";
+import { AppState, orderMap } from "../../core/state.tx";
+import { recordAppEvent, touchAppState } from "../../core/store.tx";
+import { AppProduct } from "../products/model.tx";
+import { getProduct } from "../products/repository.tx";
+import { AppUser } from "../users/model.tx";
+import { getUser } from "../users/repository.tx";
+import { AppOrder, OrderCollection, orderToView } from "./model.tx";
+import { deleteOrder, getOrder, insertOrder, updateOrder } from "./repository.tx";
+
+function parseBody(body: string): any {
+    if (body.trim() == "") {
+        throw new Error("Request body is required");
+    }
+
+    return parse(body);
+}
+
+function removeOrderFromState(orders: OrderCollection, id: string): void {
+    let index: int = findIdIndex(orders.ids, id);
+    if (index < 0) {
+        return;
+    }
+
+    let nextIds: string[] = [];
+    let nextItems = new Map<string, AppOrder>();
+
+    for (let i: int = 0; i < orders.ids.length(); i++) {
+        let orderId: string = orders.ids[i];
+        if (orderId == id) {
+            continue;
+        }
+
+        let orderValue: Optional<AppOrder> = getOrder(orders, orderId);
+        if (orderValue != None) {
+            nextIds.push(orderId);
+            nextItems.set(orderId, orderValue as AppOrder);
+        }
+    }
+
+    orders.ids = nextIds;
+    orders.items = nextItems;
+}
+
+export function handleOrdersCollection(method: string, body: string, state: AppState): Response {
+    if (method == "GET") {
+        return createJsonResponse({
+            count: state.orders.ids.length(),
+            ids: state.orders.ids,
+            items: orderMap(state.orders)
+        }, 200);
+    }
+
+    if (method == "POST") {
+        try {
+            let payload: any = parseBody(body);
+            let userIdValue: any = payload["userId"];
+            let productIdsValue: any = payload["productIds"];
+            if (userIdValue == None || productIdsValue == None) {
+                return jsonError("userId and productIds are required", 400);
+            }
+
+            let productIds: string[] = [];
+            let values: any[] = productIdsValue as any[];
+            for (let i: int = 0; i < values.length(); i++) {
+                productIds.push(String(values[i]));
+            }
+            if (productIds.length() == 0) {
+                return jsonError("userId and productIds are required", 400);
+            }
+
+            let userId: string = String(userIdValue);
+            let userValue: Optional<AppUser> = getUser(state.users, userId);
+            if (userValue == None) {
+                return jsonError("Order user was not found", 404);
+            }
+
+            let total: float = 0.0;
+            for (let i: int = 0; i < productIds.length(); i++) {
+                let productId: string = productIds[i];
+                let productValue: Optional<AppProduct> = getProduct(state.products, productId);
+                if (productValue == None) {
+                    return jsonError("Product " + productId + " not found", 404);
+                }
+
+                total = total + (productValue as AppProduct).price;
+            }
+
+            let status: string = payload["status"] != None ? String(payload["status"]) : "pending";
+            let orderId: string = nextEntityId("order", state.orders.ids);
+            let order = new AppOrder(
+                orderId,
+                userId,
+                productIds,
+                total,
+                status,
+                nowMs()
+            );
+
+            state.orders.ids.push(orderId);
+            state.orders.items.set(orderId, order);
+            insertOrder(state.client, order);
+            recordAppEvent(state, "created", "order", orderId);
+            touchAppState(state);
+            return createJsonResponse(orderToView(order), 201);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    return jsonError("Method not allowed", 405);
+}
+
+export function handleOrderItem(method: string, body: string, state: AppState, orderId: string): Response {
+    let orderValue: Optional<AppOrder> = getOrder(state.orders, orderId);
+    if (orderValue == None) {
+        return jsonError("Order not found", 404);
+    }
+
+    let order: AppOrder = orderValue as AppOrder;
+
+    if (method == "GET") {
+        return createJsonResponse(orderToView(order), 200);
+    }
+
+    if (method == "PUT") {
+        try {
+            let payload: any = parseBody(body);
+            if (payload["status"] == None) {
+                return jsonError("status is required", 400);
+            }
+
+            order.status = String(payload["status"]);
+            updateOrder(state.client, orderId, order);
+            recordAppEvent(state, "updated", "order", orderId);
+            touchAppState(state);
+            return createJsonResponse(orderToView(order), 200);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    if (method == "DELETE") {
+        removeOrderFromState(state.orders, orderId);
+        deleteOrder(state.client, orderId);
+        recordAppEvent(state, "deleted", "order", orderId);
+        touchAppState(state);
+        return createJsonResponse({ deleted: true, id: orderId }, 200);
+    }
+
+    return jsonError("Method not allowed", 405);
+}

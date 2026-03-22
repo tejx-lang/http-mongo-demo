@@ -1,0 +1,14 @@
+import { nowMs } from "std:time";
+
+export function nextEntityId(prefix: string, ids: string[]): string {
+    return prefix + "-" + String(nowMs()) + "-" + String(ids.length() + 1);
+}
+
+export function findIdIndex(ids: string[], id: string): int {
+    for (let i: int = 0; i < ids.length(); i++) {
+        if (ids[i] == id) {
+            return i;
+        }
+    }
+    return -1;
+}

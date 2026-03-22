@@ -1,0 +1,158 @@
+import { Map } from "std:collections";
+import { parse } from "std:json";
+import { nowMs } from "std:time";
+import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+import { findIdIndex, nextEntityId } from "../../core/ids.tx";
+import { jsonError } from "../../core/responses.tx";
+import { AppState, productMap } from "../../core/state.tx";
+import { recordAppEvent, touchAppState } from "../../core/store.tx";
+import { AppOrder } from "../orders/model.tx";
+import { AppProduct, ProductCollection, productToView } from "./model.tx";
+import { deleteProduct, getProduct, insertProduct, updateProduct } from "./repository.tx";
+
+function parseBody(body: string): any {
+    if (body.trim() == "") {
+        throw new Error("Request body is required");
+    }
+
+    return parse(body);
+}
+
+function removeProductFromState(products: ProductCollection, id: string): void {
+    let index: int = findIdIndex(products.ids, id);
+    if (index < 0) {
+        return;
+    }
+
+    let nextIds: string[] = [];
+    let nextItems = new Map<string, AppProduct>();
+
+    for (let i: int = 0; i < products.ids.length(); i++) {
+        let productId: string = products.ids[i];
+        if (productId == id) {
+            continue;
+        }
+
+        let productValue: Optional<AppProduct> = getProduct(products, productId);
+        if (productValue != None) {
+            nextIds.push(productId);
+            nextItems.set(productId, productValue as AppProduct);
+        }
+    }
+
+    products.ids = nextIds;
+    products.items = nextItems;
+}
+
+function productExistsInOrders(state: AppState, productId: string): bool {
+    for (let i: int = 0; i < state.orders.ids.length(); i++) {
+        let orderId: string = state.orders.ids[i];
+        let orderValue: Optional<AppOrder> = state.orders.items.get(orderId);
+        if (orderValue == None) {
+            continue;
+        }
+
+        let order: AppOrder = orderValue as AppOrder;
+        for (let j: int = 0; j < order.productIds.length(); j++) {
+            if (order.productIds[j] == productId) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+export function handleProductsCollection(method: string, body: string, state: AppState): Response {
+    if (method == "GET") {
+        return createJsonResponse({
+            count: state.products.ids.length(),
+            ids: state.products.ids,
+            items: productMap(state.products)
+        }, 200);
+    }
+
+    if (method == "POST") {
+        try {
+            let payload: any = parseBody(body);
+            if (payload["name"] == None || payload["price"] == None) {
+                return jsonError("name and price are required", 400);
+            }
+
+            let stock: int = payload["stock"] != None ? parseFloat(String(payload["stock"])) as int : 0;
+            let category: string = payload["category"] != None ? String(payload["category"]) : "misc";
+            let productId: string = nextEntityId("product", state.products.ids);
+            let product = new AppProduct(
+                productId,
+                String(payload["name"]),
+                parseFloat(String(payload["price"])),
+                stock,
+                category,
+                nowMs()
+            );
+
+            state.products.ids.push(productId);
+            state.products.items.set(productId, product);
+            insertProduct(state.client, product);
+            recordAppEvent(state, "created", "product", productId);
+            touchAppState(state);
+            return createJsonResponse(productToView(product), 201);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    return jsonError("Method not allowed", 405);
+}
+
+export function handleProductItem(method: string, body: string, state: AppState, productId: string): Response {
+    let productValue: Optional<AppProduct> = getProduct(state.products, productId);
+    if (productValue == None) {
+        return jsonError("Product not found", 404);
+    }
+
+    let product: AppProduct = productValue as AppProduct;
+
+    if (method == "GET") {
+        return createJsonResponse(productToView(product), 200);
+    }
+
+    if (method == "PUT") {
+        try {
+            let payload: any = parseBody(body);
+            if (payload["name"] != None) {
+                product.name = String(payload["name"]);
+            }
+            if (payload["price"] != None) {
+                product.price = parseFloat(String(payload["price"]));
+            }
+            if (payload["stock"] != None) {
+                product.stock = parseFloat(String(payload["stock"])) as int;
+            }
+            if (payload["category"] != None) {
+                product.category = String(payload["category"]);
+            }
+
+            updateProduct(state.client, productId, product);
+            recordAppEvent(state, "updated", "product", productId);
+            touchAppState(state);
+            return createJsonResponse(productToView(product), 200);
+        } catch (error) {
+            return jsonError("Invalid JSON body", 400);
+        }
+    }
+
+    if (method == "DELETE") {
+        if (productExistsInOrders(state, productId)) {
+            return jsonError("Product exists in orders and cannot be deleted", 409);
+        }
+
+        removeProductFromState(state.products, productId);
+        deleteProduct(state.client, productId);
+        recordAppEvent(state, "deleted", "product", productId);
+        touchAppState(state);
+        return createJsonResponse({ deleted: true, id: productId }, 200);
+    }
+
+    return jsonError("Method not allowed", 405);
+}

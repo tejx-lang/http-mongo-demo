@@ -1,0 +1,63 @@
+export function stringValue(value: any, fallback: string = ""): string {
+    if (value == None) {
+        return fallback;
+    }
+    return String(value);
+}
+
+export function intValue(value: any, fallback: int = 0): int {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return value as int;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1 : 0;
+    }
+
+    return parseFloat(String(value)) as int;
+}
+
+export function int64Value(value: any, fallback: int64 = 0): int64 {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int64") {
+        return value as int64;
+    }
+    if (kind == "int" || kind == "int32") {
+        return value as int64;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int64;
+    }
+
+    return (parseFloat(String(value)) as int) as int64;
+}
+
+export function floatValue(value: any, fallback: float = 0.0): float {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return value as float;
+    }
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return (value as int64) as float;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1.0 : 0.0;
+    }
+
+    return parseFloat(String(value));
+}

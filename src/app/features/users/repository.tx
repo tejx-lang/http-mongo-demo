@@ -1,0 +1,61 @@
+import { cloneWithoutMongoFields, deleteDocument, insertDocument, updateDocument } from "../../core/persistence.tx";
+import { MongoClient } from "../../../modules/mongo/client.tx";
+import { AppUser, UserCollection, userFromDocument, userToDocument } from "./model.tx";
+
+export function loadUsers(client: MongoClient): UserCollection {
+    let users = new UserCollection();
+    let documents: any[] = client.find("users", {});
+
+    for (let i: int = 0; i < documents.length(); i++) {
+        let userValue: Optional<AppUser> = userFromDocument(cloneWithoutMongoFields(documents[i]));
+        if (userValue == None) {
+            continue;
+        }
+
+        let user: AppUser = userValue as AppUser;
+        users.ids.push(user.id);
+        users.items.set(user.id, user);
+    }
+
+    return users;
+}
+
+export function getUser(users: UserCollection, id: string): Optional<AppUser> {
+    return users.items.get(id);
+}
+
+export function findUserByEmail(users: UserCollection, email: string): Optional<AppUser> {
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let userId: string = users.ids[i];
+        let userValue: Optional<AppUser> = users.items.get(userId);
+        if (userValue != None && (userValue as AppUser).email == email) {
+            return userValue as AppUser;
+        }
+    }
+
+    return None;
+}
+
+export function userIndexByEmail(users: UserCollection, email: string): int {
+    for (let i: int = 0; i < users.ids.length(); i++) {
+        let userId: string = users.ids[i];
+        let userValue: Optional<AppUser> = users.items.get(userId);
+        if (userValue != None && (userValue as AppUser).email == email) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+export function insertUser(client: MongoClient, user: AppUser): void {
+    insertDocument(client, "users", userToDocument(user));
+}
+
+export function updateUser(client: MongoClient, id: string, user: AppUser): void {
+    updateDocument(client, "users", id, userToDocument(user));
+}
+
+export function deleteUser(client: MongoClient, id: string): void {
+    deleteDocument(client, "users", id);
+}

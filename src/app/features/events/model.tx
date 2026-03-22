@@ -1,0 +1,57 @@
+import { Map } from "std:collections";
+import { int64Value, stringValue } from "../../core/coerce.tx";
+
+export class AppEvent {
+    id: string;
+    action: string;
+    entity: string;
+    entityId: string;
+    createdAt: int64;
+
+    constructor(id: string, action: string, entity: string, entityId: string, createdAt: int64) {
+        this.id = id;
+        this.action = action;
+        this.entity = entity;
+        this.entityId = entityId;
+        this.createdAt = createdAt;
+    }
+}
+
+export class EventCollection {
+    ids: string[];
+    items: Map<string, AppEvent>;
+
+    constructor() {
+        this.ids = [];
+        this.items = new Map<string, AppEvent>();
+    }
+}
+
+export function eventToDocument(event: AppEvent): any {
+    return {
+        id: event.id,
+        action: event.action,
+        entity: event.entity,
+        entityId: event.entityId,
+        createdAt: event.createdAt
+    };
+}
+
+export function eventFromDocument(document: any): Optional<AppEvent> {
+    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+    if (id == "") {
+        return None;
+    }
+
+    return new AppEvent(
+        id,
+        stringValue(document["action"]),
+        stringValue(document["entity"]),
+        stringValue(document["entityId"]),
+        int64Value(document["createdAt"], 0)
+    );
+}
+
+export function eventToView(event: AppEvent): any {
+    return eventToDocument(event);
+}

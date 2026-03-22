@@ -2,7 +2,7 @@ import std:net;
 import std:binary;
 import { buildScramContinue, buildScramStart, binaryPayloadToText, generateScramNonce, validateScramFinal } from "./auth.tx";
 import { decodeDocumentFromReader, encodeDocument, encodeDocumentWithKeys, bsonBinary } from "./bson.tx";
-import { MongoConnectionConfig } from "../../app/models/domain.tx";
+import { MongoConnectionConfig } from "./config.tx";
 
 function mongoOpMsg(): int {
     return 2013;
@@ -108,6 +108,26 @@ function stableText(text: string): string {
     return binary.toString(binary.fromString(text));
 }
 
+function orderedCommand(commandName: string, commandValue: any, extraFields: any = None, extraOrder: string[] = []): any {
+    let command: any = {};
+    let order: string[] = [commandName];
+    command[commandName] = commandValue;
+
+    if (extraFields != None) {
+        for (let i: int = 0; i < extraOrder.length(); i++) {
+            let key: string = extraOrder[i];
+            if (key == "_bsonOrder") {
+                continue;
+            }
+            command[key] = extraFields[key];
+            order.push(key);
+        }
+    }
+
+    command["_bsonOrder"] = order;
+    return command;
+}
+
 function readRawMessage(stream: TcpStream): any {
     let headerBytes: Optional<int[]> = stream.readExactBytes(16);
     if (headerBytes == None) {
@@ -144,9 +164,8 @@ function sendRawCommand(host: string, port: int, requestId: int, command: any): 
         throw new Error("Failed to connect to MongoDB at " + host + ":" + String(port));
     }
     let stream: TcpStream = maybeStream as TcpStream;
-    stream.setTimeout(30000);
 
-    let bodyDocument: int[] = encodeDocument(command);
+    let bodyDocument: int[] = binary.concat([encodeDocument(command)]);
     let payloadWriter: ByteWriter = binary.writer();
     payloadWriter.writeI32LE(0);
     payloadWriter.writeU8(mongoSectionBody());
@@ -174,19 +193,15 @@ export function primeMongoConnection(connection: MongoConnectionConfig): void {
     let port: int = connection.port;
     let database: string = stableText(connection.database);
 
-    sendRawCommand(host, port, 1, {
-        ping: 1,
-        "$db": database
-    });
+    sendRawCommand(host, port, 1, orderedCommand("ping", 1, { "$db": database }, ["$db"]));
 
     try {
-        sendRawCommand(host, port, 2, {
-            find: "app_meta",
+        sendRawCommand(host, port, 2, orderedCommand("find", "app_meta", {
             filter: { "_id": "app-meta" },
             limit: 1,
             singleBatch: true,
             "$db": database
-        });
+        }, ["filter", "limit", "singleBatch", "$db"]));
     } catch (primeError) {
     }
 }
@@ -247,9 +262,7 @@ export class MongoClient {
         if (maybeStream == None) {
             throw new Error("Failed to connect to MongoDB at " + this.address());
         }
-        let stream: TcpStream = maybeStream as TcpStream;
-        stream.setTimeout(30000);
-        return stream;
+        return maybeStream as TcpStream;
     }
 
     private openStream(): TcpStream {
@@ -334,18 +347,19 @@ export class MongoClient {
         let bodyDocument: int[] = commandBody["_bsonOrder"] != None
             ? encodeDocumentWithKeys(commandBody, commandBody["_bsonOrder"] as string[])
             : encodeDocument(commandBody);
+        let stableBodyDocument: int[] = binary.concat([bodyDocument]);
 
         let payloadWriter: ByteWriter = binary.writer();
         payloadWriter.writeI32LE(0);
         payloadWriter.writeU8(mongoSectionBody());
-        payloadWriter.writeBytes(bodyDocument);
+        payloadWriter.writeBytes(stableBodyDocument);
 
         if (sequenceName != None && sequenceDocuments != None) {
             let docs: any[] = sequenceDocuments as any[];
             let sequenceWriter: ByteWriter = binary.writer();
             sequenceWriter.writeCString(sequenceName as string);
             for (let i: int = 0; i < docs.length(); i++) {
-                sequenceWriter.writeBytes(encodeDocument(docs[i]));
+                sequenceWriter.writeBytes(binary.concat([encodeDocument(docs[i])]));
             }
 
             let sequenceBytes: int[] = sequenceWriter.toBytes();
@@ -391,15 +405,14 @@ export class MongoClient {
 
         let nonce: string = generateScramNonce(username + ":" + this.address() + ":" + String(this.requestId));
         let start: any = buildScramStart(username, nonce);
-        let startResponse: any = this.sendCommandOnStream(stream, {
-            saslStart: 1,
+        let startResponse: any = this.sendCommandOnStream(stream, orderedCommand("saslStart", 1, {
             mechanism: "SCRAM-SHA-256",
             payload: bsonBinary(binary.fromString(start["message"] as string)),
             autoAuthorize: 1,
             options: {
                 skipEmptyExchange: true
             }
-        }, authDatabase);
+        }, ["mechanism", "payload", "autoAuthorize", "options"]), authDatabase);
 
         let conversationId: int = startResponse["conversationId"] as int;
         let serverFirstMessage: string = binaryPayloadToText(startResponse["payload"]);
@@ -410,19 +423,17 @@ export class MongoClient {
             serverFirstMessage
         );
 
-        let continueResponse: any = this.sendCommandOnStream(stream, {
-            saslContinue: 1,
+        let continueResponse: any = this.sendCommandOnStream(stream, orderedCommand("saslContinue", 1, {
             conversationId: conversationId,
             payload: bsonBinary(binary.fromString(next["message"] as string))
-        }, authDatabase);
+        }, ["conversationId", "payload"]), authDatabase);
 
         validateScramFinal(binaryPayloadToText(continueResponse["payload"]), next["serverSignature"] as string);
         if (!boolValue(continueResponse["done"], false)) {
-            let finalResponse: any = this.sendCommandOnStream(stream, {
-                saslContinue: 1,
+            let finalResponse: any = this.sendCommandOnStream(stream, orderedCommand("saslContinue", 1, {
                 conversationId: conversationId,
                 payload: bsonBinary([])
-            }, authDatabase);
+            }, ["conversationId", "payload"]), authDatabase);
 
             let finalMessage: string = binaryPayloadToText(finalResponse["payload"]);
             if (finalMessage != "") {
@@ -444,8 +455,8 @@ export class MongoClient {
 
     private runCommand(command: any, database: string): any {
         try {
-            let stream: TcpStream = this.openStream();
-            let response: any = this.sendCommandOnStream(stream, command, database);
+            let streamValue: TcpStream = this.openStream();
+            let response: any = this.sendCommandOnStream(streamValue, command, database);
             return response;
         } catch (error) {
             if (this.streamOpen) {
@@ -461,8 +472,8 @@ export class MongoClient {
         let commandBody: any = withDatabase(command, database);
 
         try {
-            let stream: TcpStream = this.openStream();
-            let response: any = this.sendPayloadOnStream(stream, commandBody, sequenceName, sequenceDocuments);
+            let streamValue: TcpStream = this.openStream();
+            let response: any = this.sendPayloadOnStream(streamValue, commandBody, sequenceName, sequenceDocuments);
             return response;
         } catch (error) {
             if (this.streamOpen) {
@@ -483,14 +494,13 @@ export class MongoClient {
     }
 
     ping(): void {
-        this.command({ ping: 1 });
+        this.command(orderedCommand("ping", 1));
     }
 
     find(collection: string, filter: any): any[] {
-        let response: any = this.command({
-            find: collection,
+        let response: any = this.command(orderedCommand("find", collection, {
             filter: filter
-        });
+        }, ["filter"]));
 
         let cursor: any = response["cursor"];
         if (cursor == None || cursor["firstBatch"] == None) {
@@ -501,12 +511,11 @@ export class MongoClient {
     }
 
     findOne(collection: string, filter: any): any {
-        let response: any = this.command({
-            find: collection,
+        let response: any = this.command(orderedCommand("find", collection, {
             filter: filter,
             limit: 1,
             singleBatch: true
-        });
+        }, ["filter", "limit", "singleBatch"]));
 
         let cursor: any = response["cursor"];
         if (cursor == None || cursor["firstBatch"] == None) {
@@ -522,15 +531,16 @@ export class MongoClient {
     }
 
     insertOne(collection: string, document: any): any {
-        return this.runCommandWithSequence({
-            insert: collection
-        }, stableText(this.databaseNameValue), "documents", [withDocumentId(document)]);
+        return this.runCommandWithSequence(
+            orderedCommand("insert", collection),
+            stableText(this.databaseNameValue),
+            "documents",
+            [withDocumentId(document)]
+        );
     }
 
     updateOne(collection: string, filter: any, setFields: any): any {
-        return this.runCommandWithSequence({
-            update: collection
-        }, stableText(this.databaseNameValue), "updates", [{
+        return this.runCommandWithSequence(orderedCommand("update", collection), stableText(this.databaseNameValue), "updates", [{
             q: filter,
             u: { "$set": setFields },
             upsert: false
@@ -538,9 +548,7 @@ export class MongoClient {
     }
 
     upsertOne(collection: string, filter: any, setFields: any): any {
-        return this.runCommandWithSequence({
-            update: collection
-        }, stableText(this.databaseNameValue), "updates", [{
+        return this.runCommandWithSequence(orderedCommand("update", collection), stableText(this.databaseNameValue), "updates", [{
             q: filter,
             u: { "$set": setFields },
             upsert: true
@@ -548,9 +556,7 @@ export class MongoClient {
     }
 
     deleteOne(collection: string, filter: any): any {
-        return this.runCommandWithSequence({
-            delete: collection
-        }, stableText(this.databaseNameValue), "deletes", [{
+        return this.runCommandWithSequence(orderedCommand("delete", collection), stableText(this.databaseNameValue), "deletes", [{
             q: filter,
             limit: 1
         }]);
