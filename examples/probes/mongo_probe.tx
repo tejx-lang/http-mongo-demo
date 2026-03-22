@@ -1,3 +1,4 @@
+// Probe that talks to Mongo through the app's bootstrap and load paths.
 import { resolveMongoConnection } from "../../src/app/config/env.tx";
 import { MongoConnection, connectMongo } from "../../src/modules/mongo/index.tx";
 import { ensureAppState, loadAppState } from "../../src/app/core/store.tx";

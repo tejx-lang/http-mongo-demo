@@ -1,6 +1,16 @@
+// Product domain types plus persistence and response shapes.
 import { Map } from "std:collections";
-import { floatValue, int64Value, intValue, stringValue } from "../../core/coerce.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 
+function cloneStrings(values: string[]): string[] {
+    let out: string[] = [];
+    for (let i: int = 0; i < values.length(); i++) {
+        out.push(values[i]);
+    }
+    return out;
+}
+
+// Internal product record used inside AppState.
 export class AppProduct {
     id: string;
     name: string;
@@ -19,6 +29,67 @@ export class AppProduct {
     }
 }
 
+// Shape written to Mongo.
+export class ProductDocument {
+    id: string;
+    name: string;
+    price: float;
+    stock: int;
+    category: string;
+    createdAt: int64;
+
+    constructor(product: AppProduct) {
+        this.id = product.id;
+        this.name = product.name;
+        this.price = product.price;
+        this.stock = product.stock;
+        this.category = product.category;
+        this.createdAt = product.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("name", this.name);
+        out.setFloat("price", this.price);
+        out.setInt("stock", this.stock);
+        out.setString("category", this.category);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// Shape returned to API callers.
+export class ProductView {
+    id: string;
+    name: string;
+    price: float;
+    stock: int;
+    category: string;
+    createdAt: int64;
+
+    constructor(product: AppProduct) {
+        this.id = product.id;
+        this.name = product.name;
+        this.price = product.price;
+        this.stock = product.stock;
+        this.category = product.category;
+        this.createdAt = product.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("name", this.name);
+        out.setFloat("price", this.price);
+        out.setInt("stock", this.stock);
+        out.setString("category", this.category);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// In-memory keyed collection used during one request.
 export class ProductCollection {
     ids: string[];
     items: Map<string, AppProduct>;
@@ -29,58 +100,78 @@ export class ProductCollection {
     }
 }
 
-export function productToDocument(product: AppProduct): any {
-    return {
-        id: product.id,
-        name: product.name,
-        price: product.price,
-        stock: product.stock,
-        category: product.category,
-        createdAt: product.createdAt
-    };
+// Serializable list view returned by product endpoints.
+export class ProductCollectionView {
+    count: int;
+    ids: string[];
+    items: Map<string, ProductView>;
+
+    constructor() {
+        this.count = 0;
+        this.ids = [];
+        this.items = new Map<string, ProductView>();
+    }
+
+    toJSON(): JsonObject {
+        let items: JsonObject = objectOf({});
+        for (let i: int = 0; i < this.ids.length(); i++) {
+            let productId: string = this.ids[i];
+            let productValue: Optional<ProductView> = this.items.get(productId);
+            if (productValue != None) {
+                items.setObject(productId, (productValue as ProductView).toJSON());
+            }
+        }
+
+        let out: JsonObject = objectOf({});
+        out.setInt("count", this.count);
+        out.setStringArray("ids", cloneStrings(this.ids));
+        out.setObject("items", items);
+        return out;
+    }
 }
 
-export function productFromDocument(document: any): Optional<AppProduct> {
-    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+export function productToDocument(product: AppProduct): ProductDocument {
+    return new ProductDocument(product);
+}
+
+export function productFromDocument(document: JsonObject): Optional<AppProduct> {
+    let id: string = document.stringOr("id", document.string("_id"));
     if (id == "") {
         return None;
     }
 
     return new AppProduct(
         id,
-        stringValue(document["name"]),
-        floatValue(document["price"], 0.0),
-        intValue(document["stock"], 0),
-        stringValue(document["category"], "misc"),
-        int64Value(document["createdAt"], 0)
+        document.string("name"),
+        document.floatOr("price", 0.0),
+        document.intOr("stock", 0),
+        document.stringOr("category", "misc"),
+        document.int64Or("createdAt", 0)
     );
 }
 
-export function productToView(product: AppProduct): any {
-    return productToDocument(product);
+export function productToView(product: AppProduct): ProductView {
+    return new ProductView(product);
 }
 
-export function productsToDocument(products: ProductCollection): any {
-    let items: any = {};
+export function productsToDocument(products: ProductCollection): ProductCollectionView {
+    let view: ProductCollectionView = new ProductCollectionView();
+    view.count = products.ids.length();
+    view.ids = cloneStrings(products.ids);
 
     for (let i: int = 0; i < products.ids.length(); i++) {
         let productId: string = products.ids[i];
         let productValue: Optional<AppProduct> = products.items.get(productId);
         if (productValue != None) {
-            items[productId] = productToView(productValue as AppProduct);
+            view.items.set(productId, productToView(productValue as AppProduct));
         }
     }
 
-    return {
-        count: products.ids.length(),
-        ids: products.ids,
-        items: items
-    };
+    return view;
 }
 
-export function lowStockProductsToDocument(products: ProductCollection, threshold: int = 10): any {
-    let ids: string[] = [];
-    let items: any = {};
+export function lowStockProductsToDocument(products: ProductCollection, threshold: int = 10): ProductCollectionView {
+    let view: ProductCollectionView = new ProductCollectionView();
 
     for (let i: int = 0; i < products.ids.length(); i++) {
         let productId: string = products.ids[i];
@@ -91,14 +182,11 @@ export function lowStockProductsToDocument(products: ProductCollection, threshol
 
         let product: AppProduct = productValue as AppProduct;
         if (product.stock < threshold) {
-            ids.push(productId);
-            items[productId] = productToView(product);
+            view.ids.push(productId);
+            view.items.set(productId, productToView(product));
         }
     }
 
-    return {
-        count: ids.length(),
-        ids: ids,
-        items: items
-    };
+    view.count = view.ids.length();
+    return view;
 }

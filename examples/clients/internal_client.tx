@@ -1,10 +1,13 @@
+// Simple end-to-end client that exercises the public HTTP API from outside the server process.
 import { stringify } from "std:json";
+import { Map } from "std:collections";
 import { getEnv } from "std:system";
 import { nowMs } from "std:time";
-import { fetch } from "../../src/modules/http/index.tx";
+import { HttpResponse, createJsonRequestHeaders, createRequest, fetch } from "../../src/modules/http/index.tx";
+import { JsonObject } from "../../src/modules/json/index.tx";
 
 function resolveBaseUrl(): string {
-    let baseUrl = getEnv("APP_BASE_URL");
+    let baseUrl: string = getEnv("APP_BASE_URL");
     if (baseUrl != "") {
         return baseUrl;
     }
@@ -22,50 +25,62 @@ function main() {
     let suffix: string = String(nowMs());
     let email: string = "demo-" + suffix;
     let password: string = "demo123";
+    let jsonHeaders: Map<string, string> = createJsonRequestHeaders();
 
-    let health = fetch(baseUrl + "/health");
-    let createUser = fetch(baseUrl + "/api/users", {
-        method: "POST",
-        body: stringify({
+    // Create one user, two products, then an order so the full CRUD/auth/report flow is exercised.
+    let health: HttpResponse = fetch(baseUrl + "/health");
+    let createUser: HttpResponse = fetch(baseUrl + "/api/users", createRequest(
+        "POST",
+        stringify({
         name: "Demo User " + suffix,
         email: email,
         password: password,
         role: "customer"
-    })});
-    let createKeyboard = fetch(baseUrl + "/api/products", {
-        method: "POST",
-        body: stringify({
+    }),
+        jsonHeaders
+    ));
+    let createKeyboard: HttpResponse = fetch(baseUrl + "/api/products", createRequest(
+        "POST",
+        stringify({
         name: "Keyboard " + suffix,
         price: 99.99,
         stock: 15,
         category: "accessories"
-    })});
-    let createMouse = fetch(baseUrl + "/api/products", {
-        method: "POST",
-        body: stringify({
+    }),
+        jsonHeaders
+    ));
+    let createMouse: HttpResponse = fetch(baseUrl + "/api/products", createRequest(
+        "POST",
+        stringify({
         name: "Mouse " + suffix,
         price: 49.5,
         stock: 22,
         category: "accessories"
-    })});
+    }),
+        jsonHeaders
+    ));
 
-    let userData: any = createUser.json();
-    let keyboardData: any = createKeyboard.json();
-    let mouseData: any = createMouse.json();
+    let userData: JsonObject = createUser.json();
+    let keyboardData: JsonObject = createKeyboard.json();
+    let mouseData: JsonObject = createMouse.json();
 
-    let login = fetch(baseUrl + "/api/auth/login", {
-        method: "POST",
-        body: stringify({
+    let login: HttpResponse = fetch(baseUrl + "/api/auth/login", createRequest(
+        "POST",
+        stringify({
         email: email,
         password: password
-    })});
-    let order = fetch(baseUrl + "/api/orders", {
-        method: "POST",
-        body: stringify({
-        userId: userData["id"],
-        productIds: [keyboardData["id"], mouseData["id"]]
-    })});
-    let summary = fetch(baseUrl + "/api/reports/summary");
+    }),
+        jsonHeaders
+    ));
+    let order: HttpResponse = fetch(baseUrl + "/api/orders", createRequest(
+        "POST",
+        stringify({
+        userId: userData.string("id"),
+        productIds: [keyboardData.string("id"), mouseData.string("id")]
+    }),
+        jsonHeaders
+    ));
+    let summary: HttpResponse = fetch(baseUrl + "/api/reports/summary");
 
     print("Internal API client using ", baseUrl);
     printResponse("GET /health", health.status, health.body);

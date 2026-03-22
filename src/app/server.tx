@@ -1,9 +1,11 @@
+// Application bootstrap: resolve configuration, connect Mongo, and start the HTTP server.
 import std:binary;
+import { nowMs } from "std:time";
 import { resolvePort, resolveBaseUrl, resolveMongoConnection } from "./config/env.tx";
 import { ensureAppState } from "./core/store.tx";
 import { MongoConnection, MongoDatabase, connectMongo } from "../modules/mongo/index.tx";
 import { describeError } from "../modules/errors/index.tx";
-import { Server } from "../modules/server/index.tx";
+import { Server, colorLabel, colorText, dimText } from "../modules/server/index.tx";
 import { createAppHandler } from "./router/index.tx";
 
 class ApplicationSettings {
@@ -34,10 +36,34 @@ class ApplicationRuntime {
     }
 }
 
+class StartupProgress {
+    startedAt: int64;
+    lastStepAt: int64;
+
+    constructor() {
+        let now: int64 = nowMs();
+        this.startedAt = now;
+        this.lastStepAt = now;
+    }
+
+    log(step: string): void {
+        let now: int64 = nowMs();
+        let sinceStart: int64 = now - this.startedAt;
+        let sinceLast: int64 = now - this.lastStepAt;
+        print(
+            colorLabel("startup +" + String(sinceStart) + "ms", "36"),
+            dimText("delta=" + String(sinceLast) + "ms"),
+            step
+        );
+        this.lastStepAt = now;
+    }
+}
+
 function atSign(): string {
     return binary.toString([64]);
 }
 
+// Render a safe connection string for logs without exposing the password.
 function describeStorage(connection: MongoConnection): string {
     let out: string = "mongodb://";
 
@@ -66,6 +92,7 @@ function describeStorage(connection: MongoConnection): string {
     return out;
 }
 
+// Collect the values the HTTP layer needs once boot completes.
 function resolveApplicationSettings(connection: MongoConnection): ApplicationSettings {
     let host: string = "127.0.0.1";
     let port: string = resolvePort();
@@ -78,38 +105,55 @@ function resolveApplicationSettings(connection: MongoConnection): ApplicationSet
     );
 }
 
-function createApplicationDatabase(connection: MongoConnection): MongoDatabase {
+// Bring the database online and ensure the expected app collections/documents exist.
+function createApplicationDatabase(connection: MongoConnection, progress: StartupProgress): MongoDatabase {
+    progress.log("Connecting to MongoDB at " + connection.host + ":" + String(connection.port));
     let database: MongoDatabase = connectMongo(connection);
+    progress.log("MongoDB connection established, ensuring app state");
     ensureAppState(database);
+    progress.log("App state ready");
     return database;
 }
 
-function createApplicationRuntime(): ApplicationRuntime {
+// Build the full runtime object in the same order the process boots.
+function createApplicationRuntime(progress: StartupProgress): ApplicationRuntime {
+    progress.log("Resolving application configuration");
     let connection: MongoConnection = resolveMongoConnection();
+    progress.log("Mongo connection resolved for " + connection.database);
     let settings: ApplicationSettings = resolveApplicationSettings(connection);
-    let database: MongoDatabase = createApplicationDatabase(connection);
+    progress.log("Server will bind to " + settings.baseUrl);
+    let database: MongoDatabase = createApplicationDatabase(connection, progress);
     return new ApplicationRuntime(settings, database);
 }
 
+// Emit the stable startup banner after the runtime is ready.
 function logStartup(runtime: ApplicationRuntime): void {
-    print("Starting TejX multi-API server on port ", runtime.settings.port);
-    print("Storage: ", runtime.settings.storageName);
-    print("Server started at ", runtime.settings.baseUrl);
-    print("Try: GET /health, GET /api/users, GET /api/products, GET /api/orders, GET /api/reports/summary");
+    print(colorLabel("server", "36"), "Starting TejX multi-API server on port", colorText(runtime.settings.port, "33"));
+    print(colorLabel("storage", "35"), runtime.settings.storageName);
+    print(colorLabel("ready", "32"), "Server started at", "http://" + runtime.settings.address());
+    print(
+        colorLabel("routes", "34"),
+        "GET /health, GET /api/users, GET /api/products, GET /api/orders, GET /api/reports/summary"
+    );
 }
 
-function startApplicationServer(runtime: ApplicationRuntime): void {
+// Hand the server module a handler that always uses the same resolved runtime.
+function startApplicationServer(runtime: ApplicationRuntime, progress: StartupProgress): void {
+    progress.log("Binding HTTP server on " + runtime.settings.address());
     let server = new Server();
     server.listen(runtime.settings.address(), createAppHandler(runtime.settings.storageName, runtime.database));
 }
 
 export function runApplication(): void {
+    let progress: StartupProgress = new StartupProgress();
+
     try {
-        let runtime: ApplicationRuntime = createApplicationRuntime();
+        progress.log("Boot sequence started");
+        let runtime: ApplicationRuntime = createApplicationRuntime(progress);
         logStartup(runtime);
-        startApplicationServer(runtime);
+        startApplicationServer(runtime, progress);
     } catch (error) {
-        print("FATAL ERROR starting server: ", describeError(error));
+        print(colorLabel("fatal", "31"), colorText("starting server failed:", "31"), describeError(error));
         exit(1);
     }
 }

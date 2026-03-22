@@ -1,3 +1,4 @@
+// Events endpoint. This API is read-only and exposes the audit trail stored in state.
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { AppState } from "../../core/state.tx";
 import { jsonError } from "../../core/responses.tx";
@@ -8,5 +9,5 @@ export function handleEvents(method: string, state: AppState): Response {
         return jsonError("Method not allowed", 405);
     }
 
-    return createJsonResponse(eventsToDocument(state.events), 200);
+    return createJsonResponse(eventsToDocument(state.events).toJSON(), 200);
 }

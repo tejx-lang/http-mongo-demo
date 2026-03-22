@@ -1,5 +1,7 @@
+// BSON encoder/decoder used by the Mongo wire-protocol client.
 import std:binary;
 import { abs, floor, round, pow, ln } from "std:math";
+import { JsonObject, objectOf } from "../json/index.tx";
 
 function bsonTypeDouble(): int { return 1; }
 function bsonTypeString(): int { return 2; }
@@ -27,6 +29,7 @@ function ieee2Pow52(): float {
     return 4503599627370496.0;
 }
 
+// Type guards used while mapping loosely typed TejX values onto BSON encodings.
 function isArrayValue(value: any): bool {
     if (value == None) {
         return false;
@@ -77,6 +80,7 @@ function bytesToHex(data: int[]): string {
     return out;
 }
 
+// Mongo stores 64-bit integers little-endian on the wire.
 export function writeInt64LE(writer: ByteWriter, value: int64): void {
     let remaining: int64 = value;
     for (let i: int = 0; i < 8; i++) {
@@ -102,6 +106,7 @@ export function readInt64LE(reader: ByteReader): int64 {
 }
 
 function writeDoubleLE(writer: ByteWriter, value: float): void {
+    // Encode a floating-point value manually because the runtime does not expose a raw IEEE writer.
     if (value == 0.0) {
         writer.writeU32LE(0);
         writer.writeU32LE(0);
@@ -145,6 +150,7 @@ function writeDoubleLE(writer: ByteWriter, value: float): void {
 }
 
 function readDoubleLE(reader: ByteReader): float {
+    // Decode the raw IEEE-754 double layout back into a runtime float.
     let lowWord: int64 = reader.readU32LE();
     let highWord: int64 = reader.readU32LE();
     
@@ -181,13 +187,23 @@ function encodeStringValue(value: string): int[] {
 
 class BsonEncoder {
     private documentKeys(value: any): string[] {
+        // `_bsonOrder` lets command builders preserve field order for protocol readability and compatibility.
         if (value["_bsonOrder"] != None) {
             return value["_bsonOrder"] as string[];
         }
         return Object.keys(value);
     }
+
+    private documentValues(keys: string[], source: any): any[] {
+        let values: any[] = [];
+        for (let i: int = 0; i < keys.length(); i++) {
+            values.push(source[keys[i]]);
+        }
+        return values;
+    }
     
     private encodeArrayDocument(values: any[]): int[] {
+        // BSON arrays are encoded as documents whose keys are `"0"`, `"1"`, `"2"`, and so on.
         let keys: string[] = [];
         for (let i: int = 0; i < values.length(); i++) {
             keys.push(String(i));
@@ -197,13 +213,10 @@ class BsonEncoder {
     
     private encodeDocumentValue(value: any): int[] {
         let keys: string[] = this.documentKeys(value);
-        let values: any[] = [];
-        for (let i: int = 0; i < keys.length(); i++) {
-            values.push(value[keys[i]]);
-        }
-        return this.encodeElements(keys, values, false);
+        return this.encodeElements(keys, this.documentValues(keys, value), false);
     }
     
+    // Encode one field according to the closest BSON type we can map from the runtime value.
     private encodeElement(key: string, value: any): int[] {
         let writer: ByteWriter = binary.writer();
         
@@ -298,6 +311,7 @@ class BsonEncoder {
             if (key == "_bsonOrder") {
                 continue;
             }
+            // Skip runtime-only values that cannot be represented in a BSON document.
             if (!isArray && (typeof(value) == "function" || value == undefined)) {
                 continue;
             }
@@ -314,56 +328,89 @@ class BsonEncoder {
     
     encodeDocument(doc: any): int[] {
         let keys: string[] = this.documentKeys(doc);
-        let values: any[] = [];
-        for (let i: int = 0; i < keys.length(); i++) {
-            values.push(doc[keys[i]]);
-        }
-        return this.encodeElements(keys, values, false);
+        return this.encodeElements(keys, this.documentValues(keys, doc), false);
     }
     
     encodeDocumentWithKeys(doc: any, keys: string[]): int[] {
-        let values: any[] = [];
-        for (let i: int = 0; i < keys.length(); i++) {
-            values.push(doc[keys[i]]);
-        }
-        return this.encodeElements(keys, values, false);
+        return this.encodeElements(keys, this.documentValues(keys, doc), false);
     }
 }
 
-export function encodeDocument(doc: any): int[] {
+export function encodeDocument(doc: JsonObject): int[] {
     let encoder = new BsonEncoder();
-    return encoder.encodeDocument(doc);
+    return encoder.encodeDocument(doc.toJSON());
 }
 
-export function encodeDocumentWithKeys(doc: any, keys: string[]): int[] {
+export function encodeDocumentWithKeys(doc: JsonObject, keys: string[]): int[] {
     let encoder = new BsonEncoder();
-    return encoder.encodeDocumentWithKeys(doc, keys);
+    return encoder.encodeDocumentWithKeys(doc.toJSON(), keys);
 }
 
-export function bsonBinary(data: int[], subtype: int = 0): any {
-    return {
-        "_bsonType": "binary",
-        subtype: subtype,
-        data: data
-    };
+export function bsonBinary(data: int[], subtype: int = 0): JsonObject {
+    // Represent raw BSON binary as a plain object so higher layers can still inspect or serialize it.
+    let binaryValue: JsonObject = objectOf({});
+    binaryValue.setString("_bsonType", "binary");
+    binaryValue.setInt("subtype", subtype);
+    binaryValue.setIntArray("data", data);
+    return binaryValue;
 }
 
 function decodeArray(reader: ByteReader): any[] {
-    let doc: any = decodeDocumentFromReader(reader);
     let out: any[] = [];
-    let keys: string[] = Object.keys(doc);
+    let length: int = reader.readI32LE();
+    let endPosition: int = reader.position() + length - 5;
     
-    for (let i: int = 0; i < keys.length(); i++) {
-        let key: string = String(i);
-        if (doc[key] != None || key == "0") {
-            out.push(doc[key]);
+    // BSON arrays are stored like documents with numeric keys, but callers expect a plain list.
+    while (reader.position() <= endPosition) {
+        let valueType: int = reader.readU8();
+        if (valueType == 0) {
+            return out;
         }
+        
+        reader.readCString();
+        out.push(decodeValue(reader, valueType));
+    }
+    
+    let terminator: int = reader.readU8();
+    if (terminator != 0) {
+        throw new Error("Invalid BSON array terminator");
     }
     
     return out;
 }
 
+export function decodeDocumentFromReader(reader: ByteReader): JsonObject {
+    let length: int = reader.readI32LE();
+    let endPosition: int = reader.position() + length - 5;
+    let out: any = {};
+    
+    // Decode field by field until the BSON terminator byte is reached.
+    while (reader.position() <= endPosition) {
+        let valueType: int = reader.readU8();
+        if (valueType == 0) {
+            return objectOf(out);
+        }
+        
+        let key: string = reader.readCString();
+        out[key] = decodeValue(reader, valueType);
+    }
+    
+    let terminator: int = reader.readU8();
+    if (terminator != 0) {
+        throw new Error("Invalid BSON document terminator");
+    }
+    
+    return objectOf(out);
+}
+
+function decodeEmbeddedDocumentValue(reader: ByteReader): any {
+    // Nested documents are unwrapped into plain values so outer JsonObject wrappers stay shallow and predictable.
+    let document: JsonObject = decodeDocumentFromReader(reader);
+    return document.toJSON();
+}
+
 function decodeValue(reader: ByteReader, valueType: int): any {
+    // Dispatch by BSON type byte and decode exactly the payload shape that follows.
     if (valueType == bsonTypeDouble()) {
         return readDoubleLE(reader);
     }
@@ -376,7 +423,7 @@ function decodeValue(reader: ByteReader, valueType: int): any {
     }
     
     if (valueType == bsonTypeDocument()) {
-        return decodeDocumentFromReader(reader);
+        return decodeEmbeddedDocumentValue(reader);
     }
     
     if (valueType == bsonTypeArray()) {
@@ -387,7 +434,7 @@ function decodeValue(reader: ByteReader, valueType: int): any {
         let length: int = reader.readI32LE();
         let subtype: int = reader.readU8();
         let data: int[] = reader.readBytes(length);
-        return bsonBinary(data, subtype);
+        return bsonBinary(data, subtype).toJSON();
     }
     
     if (valueType == bsonTypeObjectId()) {
@@ -430,35 +477,13 @@ function decodeValue(reader: ByteReader, valueType: int): any {
     throw new Error("Unsupported BSON value type " + String(valueType));
 }
 
-export function decodeDocumentFromReader(reader: ByteReader): any {
-    let length: int = reader.readI32LE();
-    let endPosition: int = reader.position() + length - 5;
-    let out: any = {};
-    
-    while (reader.position() <= endPosition) {
-        let valueType: int = reader.readU8();
-        if (valueType == 0) {
-            return out;
-        }
-        
-        let key: string = reader.readCString();
-        out[key] = decodeValue(reader, valueType);
-    }
-    
-    let terminator: int = reader.readU8();
-    if (terminator != 0) {
-        throw new Error("Invalid BSON document terminator");
-    }
-    
-    return out;
-}
-
-export function decodeDocument(data: int[]): any {
+export function decodeDocument(data: int[]): JsonObject {
     let reader = binary.reader(data);
     return decodeDocumentFromReader(reader);
 }
 
 export function documentKeysInOrder(data: int[]): string[] {
+    // Some command paths only need the field order, not the decoded values.
     let reader = binary.reader(data);
     let length: int = reader.readI32LE();
     let endPosition: int = reader.position() + length - 5;

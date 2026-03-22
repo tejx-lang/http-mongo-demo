@@ -1,3 +1,4 @@
+// Tiny field readers used when a full JSON parse would be unnecessary overhead.
 function charAt(text: string, index: int): string {
     return text.substring(index, index + 1);
 }

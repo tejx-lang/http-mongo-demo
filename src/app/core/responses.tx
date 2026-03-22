@@ -1,5 +1,9 @@
+// Tiny shared response helpers so handlers stay focused on business rules.
+import { JsonObject, objectOf } from "../../modules/json/index.tx";
 import { Response, createJsonResponse } from "../../modules/server/index.tx";
 
 export function jsonError(message: string, status: int): Response {
-    return createJsonResponse({ error: message }, status);
+    let body: JsonObject = objectOf({});
+    body.setString("error", message);
+    return createJsonResponse(body, status);
 }

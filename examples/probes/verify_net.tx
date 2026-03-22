@@ -1,3 +1,4 @@
+// Minimal networking smoke test for the runtime's TCP listener support.
 import std:net;
 
 function main() {

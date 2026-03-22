@@ -1,5 +1,6 @@
+// Public metadata module surface.
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
-import { AppMeta, metaToDocument } from "./model.tx";
+import { AppMeta, MetaDocument, metaToDocument } from "./model.tx";
 import { ensureMeta, loadMeta, saveMeta } from "./repository.tx";
 
 export function bootstrapMeta(client: MongoDatabase): void {
@@ -14,6 +15,6 @@ export function saveMetaState(client: MongoDatabase, meta: AppMeta): void {
     saveMeta(client, meta);
 }
 
-export function toMetaView(meta: AppMeta): any {
+export function toMetaView(meta: AppMeta): MetaDocument {
     return metaToDocument(meta);
 }

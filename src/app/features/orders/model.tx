@@ -1,5 +1,6 @@
+// Order domain types plus persistence and response shapes.
 import { Map } from "std:collections";
-import { floatValue, int64Value, stringValue } from "../../core/coerce.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 
 function cloneStrings(values: string[]): string[] {
     let out: string[] = [];
@@ -9,6 +10,7 @@ function cloneStrings(values: string[]): string[] {
     return out;
 }
 
+// Internal order record used inside AppState.
 export class AppOrder {
     id: string;
     userId: string;
@@ -27,6 +29,67 @@ export class AppOrder {
     }
 }
 
+// Shape written to Mongo.
+export class OrderDocument {
+    id: string;
+    userId: string;
+    productIds: string[];
+    total: float;
+    status: string;
+    createdAt: int64;
+
+    constructor(order: AppOrder) {
+        this.id = order.id;
+        this.userId = order.userId;
+        this.productIds = cloneStrings(order.productIds);
+        this.total = order.total;
+        this.status = order.status;
+        this.createdAt = order.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("userId", this.userId);
+        out.setStringArray("productIds", cloneStrings(this.productIds));
+        out.setFloat("total", this.total);
+        out.setString("status", this.status);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// Shape returned to API callers.
+export class OrderView {
+    id: string;
+    userId: string;
+    productIds: string[];
+    total: float;
+    status: string;
+    createdAt: int64;
+
+    constructor(order: AppOrder) {
+        this.id = order.id;
+        this.userId = order.userId;
+        this.productIds = cloneStrings(order.productIds);
+        this.total = order.total;
+        this.status = order.status;
+        this.createdAt = order.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("userId", this.userId);
+        out.setStringArray("productIds", cloneStrings(this.productIds));
+        out.setFloat("total", this.total);
+        out.setString("status", this.status);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// In-memory keyed collection used during one request.
 export class OrderCollection {
     ids: string[];
     items: Map<string, AppOrder>;
@@ -37,62 +100,74 @@ export class OrderCollection {
     }
 }
 
-export function orderToDocument(order: AppOrder): any {
-    return {
-        id: order.id,
-        userId: order.userId,
-        productIds: cloneStrings(order.productIds),
-        total: order.total,
-        status: order.status,
-        createdAt: order.createdAt
-    };
+// Serializable list view returned by order endpoints.
+export class OrderCollectionView {
+    count: int;
+    ids: string[];
+    items: Map<string, OrderView>;
+
+    constructor() {
+        this.count = 0;
+        this.ids = [];
+        this.items = new Map<string, OrderView>();
+    }
+
+    toJSON(): JsonObject {
+        let items: JsonObject = objectOf({});
+        for (let i: int = 0; i < this.ids.length(); i++) {
+            let orderId: string = this.ids[i];
+            let orderValue: Optional<OrderView> = this.items.get(orderId);
+            if (orderValue != None) {
+                items.setObject(orderId, (orderValue as OrderView).toJSON());
+            }
+        }
+
+        let out: JsonObject = objectOf({});
+        out.setInt("count", this.count);
+        out.setStringArray("ids", cloneStrings(this.ids));
+        out.setObject("items", items);
+        return out;
+    }
 }
 
-export function orderFromDocument(document: any): Optional<AppOrder> {
-    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+export function orderToDocument(order: AppOrder): OrderDocument {
+    return new OrderDocument(order);
+}
+
+export function orderFromDocument(document: JsonObject): Optional<AppOrder> {
+    let id: string = document.stringOr("id", document.string("_id"));
     if (id == "") {
         return None;
     }
 
-    let productIds: string[] = [];
-    let rawProductIds: any = document["productIds"];
-    if (rawProductIds != None) {
-        let values: any[] = rawProductIds as any[];
-        for (let i: int = 0; i < values.length(); i++) {
-            productIds.push(stringValue(values[i]));
-        }
-    }
-
     return new AppOrder(
         id,
-        stringValue(document["userId"]),
-        productIds,
-        floatValue(document["total"], 0.0),
-        stringValue(document["status"], "pending"),
-        int64Value(document["createdAt"], 0)
+        document.string("userId"),
+        document.stringArray("productIds"),
+        document.floatOr("total", 0.0),
+        document.stringOr("status", "pending"),
+        document.int64Or("createdAt", 0)
     );
 }
 
-export function orderToView(order: AppOrder): any {
-    return orderToDocument(order);
+export function orderToView(order: AppOrder): OrderView {
+    return new OrderView(order);
 }
 
-export function ordersToDocument(orders: OrderCollection): any {
-    let items: any = {};
+export function ordersToDocument(orders: OrderCollection): OrderCollectionView {
+    let view: OrderCollectionView = new OrderCollectionView();
+    view.count = orders.ids.length();
+    view.ids = cloneStrings(orders.ids);
 
     for (let i: int = 0; i < orders.ids.length(); i++) {
         let orderId: string = orders.ids[i];
         let orderValue: Optional<AppOrder> = orders.items.get(orderId);
         if (orderValue != None) {
-            items[orderId] = orderToView(orderValue as AppOrder);
+            view.items.set(orderId, orderToView(orderValue as AppOrder));
         }
     }
 
-    return {
-        count: orders.ids.length(),
-        ids: orders.ids,
-        items: items
-    };
+    return view;
 }
 
 export function totalOrderRevenue(orders: OrderCollection): float {

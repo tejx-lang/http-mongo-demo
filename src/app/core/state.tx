@@ -1,3 +1,4 @@
+// The in-memory request snapshot passed between route handlers during one request.
 import { MongoDatabase } from "../../modules/mongo/index.tx";
 import { EventCollection } from "../features/events/model.tx";
 import { AppMeta } from "../features/meta/model.tx";

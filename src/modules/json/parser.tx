@@ -1,3 +1,4 @@
+// Small JSON parser used where the runtime only needs simple object/array support.
 import std:binary;
 
 function stableCopy(text: string): string {
@@ -20,6 +21,7 @@ function splitTopLevel(text: string, delimiter: string): string[] {
     let arrayDepth: int = 0;
     let objectDepth: int = 0;
 
+    // Track nesting depth so commas/colons inside arrays or strings do not split the outer value.
     for (let i: int = 0; i < text.length(); i++) {
         let ch: string = charAt(text, i);
 

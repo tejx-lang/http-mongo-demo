@@ -1,6 +1,16 @@
+// Event domain types plus persistence and response shapes.
 import { Map } from "std:collections";
-import { int64Value, stringValue } from "../../core/coerce.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 
+function cloneStrings(values: string[]): string[] {
+    let out: string[] = [];
+    for (let i: int = 0; i < values.length(); i++) {
+        out.push(values[i]);
+    }
+    return out;
+}
+
+// Internal event record used inside application state.
 export class AppEvent {
     id: string;
     action: string;
@@ -17,6 +27,61 @@ export class AppEvent {
     }
 }
 
+// Shape written to Mongo.
+export class EventDocument {
+    id: string;
+    action: string;
+    entity: string;
+    entityId: string;
+    createdAt: int64;
+
+    constructor(event: AppEvent) {
+        this.id = event.id;
+        this.action = event.action;
+        this.entity = event.entity;
+        this.entityId = event.entityId;
+        this.createdAt = event.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("action", this.action);
+        out.setString("entity", this.entity);
+        out.setString("entityId", this.entityId);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// Shape returned to API callers.
+export class EventView {
+    id: string;
+    action: string;
+    entity: string;
+    entityId: string;
+    createdAt: int64;
+
+    constructor(event: AppEvent) {
+        this.id = event.id;
+        this.action = event.action;
+        this.entity = event.entity;
+        this.entityId = event.entityId;
+        this.createdAt = event.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("action", this.action);
+        out.setString("entity", this.entity);
+        out.setString("entityId", this.entityId);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// In-memory keyed collection used during one request.
 export class EventCollection {
     ids: string[];
     items: Map<string, AppEvent>;
@@ -27,49 +92,71 @@ export class EventCollection {
     }
 }
 
-export function eventToDocument(event: AppEvent): any {
-    return {
-        id: event.id,
-        action: event.action,
-        entity: event.entity,
-        entityId: event.entityId,
-        createdAt: event.createdAt
-    };
+// Serializable summary returned by the `/api/events` endpoint.
+export class EventCollectionView {
+    count: int;
+    ids: string[];
+    items: Map<string, EventView>;
+
+    constructor() {
+        this.count = 0;
+        this.ids = [];
+        this.items = new Map<string, EventView>();
+    }
+
+    toJSON(): JsonObject {
+        let items: JsonObject = objectOf({});
+        for (let i: int = 0; i < this.ids.length(); i++) {
+            let eventId: string = this.ids[i];
+            let eventValue: Optional<EventView> = this.items.get(eventId);
+            if (eventValue != None) {
+                items.setObject(eventId, (eventValue as EventView).toJSON());
+            }
+        }
+
+        let out: JsonObject = objectOf({});
+        out.setInt("count", this.count);
+        out.setStringArray("ids", cloneStrings(this.ids));
+        out.setObject("items", items);
+        return out;
+    }
 }
 
-export function eventFromDocument(document: any): Optional<AppEvent> {
-    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+export function eventToDocument(event: AppEvent): EventDocument {
+    return new EventDocument(event);
+}
+
+export function eventFromDocument(document: JsonObject): Optional<AppEvent> {
+    let id: string = document.stringOr("id", document.string("_id"));
     if (id == "") {
         return None;
     }
 
     return new AppEvent(
         id,
-        stringValue(document["action"]),
-        stringValue(document["entity"]),
-        stringValue(document["entityId"]),
-        int64Value(document["createdAt"], 0)
+        document.string("action"),
+        document.string("entity"),
+        document.string("entityId"),
+        document.int64Or("createdAt", 0)
     );
 }
 
-export function eventToView(event: AppEvent): any {
-    return eventToDocument(event);
+export function eventToView(event: AppEvent): EventView {
+    return new EventView(event);
 }
 
-export function eventsToDocument(events: EventCollection): any {
-    let items: any = {};
+export function eventsToDocument(events: EventCollection): EventCollectionView {
+    let view: EventCollectionView = new EventCollectionView();
+    view.count = events.ids.length();
+    view.ids = cloneStrings(events.ids);
 
     for (let i: int = 0; i < events.ids.length(); i++) {
         let eventId: string = events.ids[i];
         let eventValue: Optional<AppEvent> = events.items.get(eventId);
         if (eventValue != None) {
-            items[eventId] = eventToView(eventValue as AppEvent);
+            view.items.set(eventId, eventToView(eventValue as AppEvent));
         }
     }
 
-    return {
-        count: events.ids.length(),
-        ids: events.ids,
-        items: items
-    };
+    return view;
 }

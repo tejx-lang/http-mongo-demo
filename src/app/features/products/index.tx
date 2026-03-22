@@ -1,5 +1,6 @@
+// Public products module surface.
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
-import { AppProduct, ProductCollection, lowStockProductsToDocument, productToView, productsToDocument } from "./model.tx";
+import { AppProduct, ProductCollection, ProductCollectionView, ProductView, lowStockProductsToDocument, productToView, productsToDocument } from "./model.tx";
 import { getProduct, loadProducts } from "./repository.tx";
 
 export function loadProductCollection(client: MongoDatabase): ProductCollection {
@@ -10,14 +11,14 @@ export function findProduct(products: ProductCollection, id: string): Optional<A
     return getProduct(products, id);
 }
 
-export function toProductView(product: AppProduct): any {
+export function toProductView(product: AppProduct): ProductView {
     return productToView(product);
 }
 
-export function toProductsView(products: ProductCollection): any {
+export function toProductsView(products: ProductCollection): ProductCollectionView {
     return productsToDocument(products);
 }
 
-export function lowStockProductsView(products: ProductCollection, threshold: int = 10): any {
+export function lowStockProductsView(products: ProductCollection, threshold: int = 10): ProductCollectionView {
     return lowStockProductsToDocument(products, threshold);
 }

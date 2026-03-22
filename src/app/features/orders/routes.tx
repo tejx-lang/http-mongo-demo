@@ -1,3 +1,4 @@
+// Route adapter for the orders feature.
 import { Response } from "../../../modules/server/index.tx";
 import { AppState } from "../../core/state.tx";
 import { handleOrderItem, handleOrdersCollection } from "./handler.tx";

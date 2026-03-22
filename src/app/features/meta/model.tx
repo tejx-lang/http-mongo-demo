@@ -1,6 +1,8 @@
+// App-wide metadata stored beside the main business collections.
 import { nowMs } from "std:time";
-import { int64Value, intValue, stringValue } from "../../core/coerce.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 
+// Internal metadata record used by AppState and startup/reporting paths.
 export class AppMeta {
     id: string;
     name: string;
@@ -30,24 +32,47 @@ export function createDefaultAppMeta(database: string): AppMeta {
     );
 }
 
-export function metaToDocument(meta: AppMeta): any {
-    return {
-        id: meta.id,
-        name: meta.name,
-        version: meta.version,
-        updatedAt: meta.updatedAt,
-        storage: meta.storage,
-        database: meta.database
-    };
+// Serializable metadata view used for persistence and API output.
+export class MetaDocument {
+    id: string;
+    name: string;
+    version: int;
+    updatedAt: int64;
+    storage: string;
+    database: string;
+
+    constructor(meta: AppMeta) {
+        this.id = meta.id;
+        this.name = meta.name;
+        this.version = meta.version;
+        this.updatedAt = meta.updatedAt;
+        this.storage = meta.storage;
+        this.database = meta.database;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("name", this.name);
+        out.setInt("version", this.version);
+        out.setInt64("updatedAt", this.updatedAt);
+        out.setString("storage", this.storage);
+        out.setString("database", this.database);
+        return out;
+    }
 }
 
-export function metaFromDocument(document: any): AppMeta {
+export function metaToDocument(meta: AppMeta): MetaDocument {
+    return new MetaDocument(meta);
+}
+
+export function metaFromDocument(document: JsonObject): AppMeta {
     return new AppMeta(
-        stringValue(document["id"] != None ? document["id"] : document["_id"], "app-meta"),
-        stringValue(document["name"], "tejx-runtime-state"),
-        intValue(document["version"], 1),
-        int64Value(document["updatedAt"], 0),
-        stringValue(document["storage"], "mongodb"),
-        stringValue(document["database"], "")
+        document.stringOr("id", document.stringOr("_id", "app-meta")),
+        document.stringOr("name", "tejx-runtime-state"),
+        document.intOr("version", 1),
+        document.int64Or("updatedAt", 0),
+        document.stringOr("storage", "mongodb"),
+        document.stringOr("database", "")
     );
 }

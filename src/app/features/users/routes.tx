@@ -1,3 +1,4 @@
+// Route adapter for the users feature.
 import { Response } from "../../../modules/server/index.tx";
 import { AppState } from "../../core/state.tx";
 import { handleUsersCollection, handleUserItem } from "./handler.tx";

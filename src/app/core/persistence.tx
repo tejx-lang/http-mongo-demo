@@ -1,31 +1,35 @@
+// Shared Mongo persistence helpers used by feature repositories.
 import { resolveMongoConnection } from "../config/env.tx";
 import { MongoConnection, MongoDatabase, connectMongo, copyMongoConnection } from "../../modules/mongo/index.tx";
+import { JsonObject, objectOf } from "../../modules/json/index.tx";
 
 let mongoConnectionState: Optional<MongoConnection> = None;
 
-export function cloneWithoutMongoFields(document: any): any {
-    let copy: any = {};
-    let keys: string[] = Object.keys(document);
+export function cloneWithoutMongoFields(document: JsonObject): JsonObject {
+    // Keep feature models free from Mongo-specific fields such as `_id`.
+    let copy: JsonObject = objectOf({});
+    let keys: string[] = document.keys();
 
     for (let i: int = 0; i < keys.length(); i++) {
         let key: string = keys[i];
         if (key == "_id") {
             continue;
         }
-        copy[key] = document[key];
+        document.copyField(copy, key, key);
     }
 
     return copy;
 }
 
-export function withMongoId(document: any): any {
-    let copy: any = cloneWithoutMongoFields(document);
-    if (copy["id"] != None) {
-        copy["_id"] = copy["id"];
+export function withMongoId(document: JsonObject): JsonObject {
+    let copy: JsonObject = cloneWithoutMongoFields(document);
+    if (document.has("id")) {
+        document.copyField(copy, "id", "_id");
     }
     return copy;
 }
 
+// Create short-lived Mongo clients so callers do not need to know how configuration is resolved.
 export function createMongoClient(): MongoDatabase {
     let connection: Optional<MongoConnection> = mongoConnectionState;
     if (connection == None) {
@@ -39,18 +43,26 @@ export function configureDatabaseConnection(connection: MongoConnection): void {
     mongoConnectionState = copyMongoConnection(connection);
 }
 
-export function insertDocument(client: MongoDatabase, collection: string, document: any): void {
+export function insertDocument(client: MongoDatabase, collection: string, document: JsonObject): void {
+    // Inserts map the app's `id` field onto Mongo's `_id` field before writing.
     client.insertOne(collection, withMongoId(document));
 }
 
-export function updateDocument(client: MongoDatabase, collection: string, id: string, document: any): void {
-    client.updateOne(collection, { "_id": id }, cloneWithoutMongoFields(document));
+export function updateDocument(client: MongoDatabase, collection: string, id: string, document: JsonObject): void {
+    // Updates target a document by `_id` and only persist the business fields.
+    let filter: JsonObject = objectOf({});
+    filter.setString("_id", id);
+    client.updateOne(collection, filter, cloneWithoutMongoFields(document));
 }
 
-export function upsertDocument(client: MongoDatabase, collection: string, filter: any, document: any): void {
+export function upsertDocument(client: MongoDatabase, collection: string, filter: JsonObject, document: JsonObject): void {
+    // Upserts reuse the same field stripping rules so Mongo metadata does not leak into app models.
     client.upsertOne(collection, filter, cloneWithoutMongoFields(document));
 }
 
 export function deleteDocument(client: MongoDatabase, collection: string, id: string): void {
-    client.deleteOne(collection, { "_id": id });
+    // Deletes always target the Mongo `_id` field.
+    let filter: JsonObject = objectOf({});
+    filter.setString("_id", id);
+    client.deleteOne(collection, filter);
 }

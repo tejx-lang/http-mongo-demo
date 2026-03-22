@@ -1,3 +1,4 @@
+// Program entry point. All real boot work lives in the app layer.
 import { runApplication } from "./app/server.tx";
 
 function main(): void {

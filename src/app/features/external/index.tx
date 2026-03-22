@@ -1,3 +1,4 @@
+// Public external feature entrypoint.
 import { Response } from "../../../modules/server/index.tx";
 import { handleExternal } from "./handler.tx";
 

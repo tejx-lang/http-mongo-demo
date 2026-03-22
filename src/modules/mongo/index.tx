@@ -1,5 +1,7 @@
+// Public Mongo module surface. Callers should depend on this file instead of internal protocol details.
 import { primeMongoConnection, MongoClient } from "./client.tx";
 import { MongoConnectionConfig } from "./config.tx";
+import { JsonObject } from "../json/index.tx";
 
 export class MongoConnection {
     uri: string;
@@ -58,27 +60,27 @@ export class MongoDatabase extends MongoClient {
         super.ping();
     }
 
-    find(collection: string, filter: any): any[] {
+    find(collection: string, filter: JsonObject): JsonObject[] {
         return super.find(collection, filter);
     }
 
-    findOne(collection: string, filter: any): any {
+    findOne(collection: string, filter: JsonObject): Optional<JsonObject> {
         return super.findOne(collection, filter);
     }
 
-    insertOne(collection: string, document: any): any {
+    insertOne(collection: string, document: JsonObject): JsonObject {
         return super.insertOne(collection, document);
     }
 
-    updateOne(collection: string, filter: any, setFields: any): any {
+    updateOne(collection: string, filter: JsonObject, setFields: JsonObject): JsonObject {
         return super.updateOne(collection, filter, setFields);
     }
 
-    upsertOne(collection: string, filter: any, setFields: any): any {
+    upsertOne(collection: string, filter: JsonObject, setFields: JsonObject): JsonObject {
         return super.upsertOne(collection, filter, setFields);
     }
 
-    deleteOne(collection: string, filter: any): any {
+    deleteOne(collection: string, filter: JsonObject): JsonObject {
         return super.deleteOne(collection, filter);
     }
 

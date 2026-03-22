@@ -1,17 +1,49 @@
-import { parse } from "std:json";
+// Login endpoint implementation.
 import { nowMs } from "std:time";
+import { JsonObject, objectOf, parseObject } from "../../../modules/json/index.tx";
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
 import { AppUser } from "../users/model.tx";
 import { findUserByEmailAddress, toUserView } from "../users/index.tx";
 
-function loginPayload(body: string): any {
+class LoginPayload {
+    email: string;
+    password: string;
+
+    constructor(email: string, password: string) {
+        this.email = email;
+        this.password = password;
+    }
+}
+
+class LoginResponse {
+    token: string;
+    user: AppUser;
+
+    constructor(token: string, user: AppUser) {
+        this.token = token;
+        this.user = user;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("token", this.token);
+        out.setObject("user", toUserView(this.user).toJSON());
+        return out;
+    }
+}
+
+function loginPayload(body: string): LoginPayload {
     if (body.trim() == "") {
         throw new Error("Request body is required");
     }
 
-    return parse(body);
+    let payload: JsonObject = parseObject(body);
+    return new LoginPayload(
+        payload.string("email"),
+        payload.string("password")
+    );
 }
 
 export function handleLogin(method: string, body: string, state: AppState): Response {
@@ -20,27 +52,26 @@ export function handleLogin(method: string, body: string, state: AppState): Resp
     }
 
     try {
-        let payload: any = loginPayload(body);
-        if (payload["email"] == None || payload["password"] == None) {
+        // Parse and validate the incoming credentials before touching application state.
+        let payload: LoginPayload = loginPayload(body);
+        if (payload.email == "" || payload.password == "") {
             return jsonError("email and password are required", 400);
         }
 
-        let email: string = String(payload["email"]);
-        let password: string = String(payload["password"]);
-        let userValue: Optional<AppUser> = findUserByEmailAddress(state.users, email);
+        let userValue: Optional<AppUser> = findUserByEmailAddress(state.users, payload.email);
         if (userValue == None) {
             return jsonError("Invalid credentials", 401);
         }
 
         let user: AppUser = userValue as AppUser;
-        if (user.password != password) {
+        if (user.password != payload.password) {
             return jsonError("Invalid credentials", 401);
         }
 
-        return createJsonResponse({
-            token: "token-" + user.id + "-" + String(nowMs()),
-            user: toUserView(user)
-        }, 200);
+        return createJsonResponse(new LoginResponse(
+            "token-" + user.id + "-" + String(nowMs()),
+            user
+        ).toJSON(), 200);
     } catch (error) {
         return jsonError("Invalid JSON body", 400);
     }

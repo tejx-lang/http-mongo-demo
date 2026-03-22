@@ -1,8 +1,10 @@
+// Mongo wire-protocol client. This module owns message framing, authentication, and command execution.
 import std:net;
 import std:binary;
 import { buildScramContinue, buildScramStart, binaryPayloadToText, generateScramNonce, validateScramFinal } from "./auth.tx";
 import { decodeDocumentFromReader, encodeDocument, encodeDocumentWithKeys, bsonBinary } from "./bson.tx";
 import { MongoConnectionConfig } from "./config.tx";
+import { JsonObject, objectOf } from "../json/index.tx";
 
 function mongoOpMsg(): int {
     return 2013;
@@ -18,87 +20,62 @@ function mongoSectionSequence(): int {
 
 let mongoRuntimePrimed: int64 = 0;
 
-function okValue(result: any): bool {
-    let ok: any = result["ok"];
-    if (ok == None) {
+function okValue(result: JsonObject): bool {
+    if (!result.has("ok")) {
         return true;
     }
 
-    let kind: string = typeof(ok);
+    let kind: string = result.kind("ok");
     if (kind == "bool") {
-        return ok as bool;
+        return result.bool("ok");
     }
 
     if (kind == "int" || kind == "int32" || kind == "int64") {
-        return (ok as int64) != 0;
+        return result.int64("ok") != 0;
     }
 
-    return (ok as float) >= 1.0;
+    return result.float("ok") >= 1.0;
 }
 
-function boolValue(value: any, fallback: bool = false): bool {
-    if (value == None) {
-        return fallback;
+function commandError(result: JsonObject): string {
+    if (result.has("errmsg")) {
+        return result.string("errmsg");
     }
-
-    let kind: string = typeof(value);
-    if (kind == "bool") {
-        return value as bool;
-    }
-
-    if (kind == "int" || kind == "int32" || kind == "int64") {
-        return (value as int64) != 0;
-    }
-
-    if (kind == "float" || kind == "float32" || kind == "float64") {
-        return (value as float) != 0.0;
-    }
-
-    if (kind == "string") {
-        return (value as string) != "";
-    }
-
-    return fallback;
-}
-
-function commandError(result: any): string {
-    if (result["errmsg"] != None) {
-        return result["errmsg"] as string;
-    }
-    if (result["codeName"] != None) {
-        return result["codeName"] as string;
+    if (result.has("codeName")) {
+        return result.string("codeName");
     }
     return "Unknown MongoDB command error";
 }
 
-function withDatabase(command: any, database: string): any {
-    let enriched: any = {};
+function withDatabase(command: JsonObject, database: string): JsonObject {
+    let enriched: JsonObject = objectOf({});
     let orderedKeys: string[] = [];
-    let keys: string[] = command["_bsonOrder"] != None ? (command["_bsonOrder"] as string[]) : Object.keys(command);
+    // Preserve BSON field order because some Mongo commands are easier to debug and compare when stable.
+    let keys: string[] = command.has("_bsonOrder") ? command.stringArray("_bsonOrder") : command.keys();
     for (let i: int = 0; i < keys.length(); i++) {
         let key: string = keys[i];
         if (key == "_bsonOrder") {
             continue;
         }
-        enriched[key] = command[key];
+        command.copyField(enriched, key, key);
         orderedKeys.push(key);
     }
-    enriched["$db"] = database;
+    enriched.setString("$db", database);
     orderedKeys.push("$db");
-    enriched["_bsonOrder"] = orderedKeys;
+    enriched.setStringArray("_bsonOrder", orderedKeys);
     return enriched;
 }
 
-function withDocumentId(document: any): any {
-    let cloned: any = {};
-    let keys: string[] = Object.keys(document);
+function withDocumentId(document: JsonObject): JsonObject {
+    let cloned: JsonObject = objectOf({});
+    let keys: string[] = document.keys();
     for (let i: int = 0; i < keys.length(); i++) {
         let key: string = keys[i];
-        cloned[key] = document[key];
+        document.copyField(cloned, key, key);
     }
 
-    if (cloned["_id"] == None && cloned["id"] != None) {
-        cloned["_id"] = cloned["id"];
+    if (!cloned.has("_id") && document.has("id")) {
+        document.copyField(cloned, "id", "_id");
     }
 
     return cloned;
@@ -108,27 +85,49 @@ function stableText(text: string): string {
     return binary.toString(binary.fromString(text));
 }
 
-function orderedCommand(commandName: string, commandValue: any, extraFields: any = None, extraOrder: string[] = []): any {
-    let command: any = {};
+function orderedIntCommand(commandName: string, commandValue: int, extraFields: Optional<JsonObject> = None, extraOrder: string[] = []): JsonObject {
+    let command: JsonObject = objectOf({});
     let order: string[] = [commandName];
-    command[commandName] = commandValue;
+    command.setInt(commandName, commandValue);
 
     if (extraFields != None) {
+        let extra: JsonObject = extraFields as JsonObject;
         for (let i: int = 0; i < extraOrder.length(); i++) {
             let key: string = extraOrder[i];
             if (key == "_bsonOrder") {
                 continue;
             }
-            command[key] = extraFields[key];
+            extra.copyField(command, key, key);
             order.push(key);
         }
     }
 
-    command["_bsonOrder"] = order;
+    command.setStringArray("_bsonOrder", order);
     return command;
 }
 
-function readRawMessage(stream: TcpStream): any {
+function orderedStringCommand(commandName: string, commandValue: string, extraFields: Optional<JsonObject> = None, extraOrder: string[] = []): JsonObject {
+    let command: JsonObject = objectOf({});
+    let order: string[] = [commandName];
+    command.setString(commandName, commandValue);
+
+    if (extraFields != None) {
+        let extra: JsonObject = extraFields as JsonObject;
+        for (let i: int = 0; i < extraOrder.length(); i++) {
+            let key: string = extraOrder[i];
+            if (key == "_bsonOrder") {
+                continue;
+            }
+            extra.copyField(command, key, key);
+            order.push(key);
+        }
+    }
+
+    command.setStringArray("_bsonOrder", order);
+    return command;
+}
+
+function readRawMessage(stream: TcpStream): JsonObject {
     let headerBytes: Optional<int[]> = stream.readExactBytes(16);
     if (headerBytes == None) {
         throw new Error("MongoDB did not return a message header");
@@ -148,6 +147,7 @@ function readRawMessage(stream: TcpStream): any {
         throw new Error("MongoDB response payload was truncated");
     }
 
+    // OP_MSG responses begin with flags and then one or more sections. This client expects a body section.
     let payloadReader: ByteReader = binary.reader(payloadBytes as int[]);
     payloadReader.readI32LE();
     let sectionKind: int = payloadReader.readU8();
@@ -158,7 +158,7 @@ function readRawMessage(stream: TcpStream): any {
     return decodeDocumentFromReader(payloadReader);
 }
 
-function sendRawCommand(host: string, port: int, requestId: int, command: any): void {
+function sendRawCommand(host: string, port: int, requestId: int, command: JsonObject): void {
     let maybeStream: Optional<TcpStream> = net.connectHost(host, port);
     if (maybeStream == None) {
         throw new Error("Failed to connect to MongoDB at " + host + ":" + String(port));
@@ -193,15 +193,20 @@ export function primeMongoConnection(connection: MongoConnectionConfig): void {
     let port: int = connection.port;
     let database: string = stableText(connection.database);
 
-    sendRawCommand(host, port, 1, orderedCommand("ping", 1, { "$db": database }, ["$db"]));
+    let pingFields: JsonObject = objectOf({});
+    pingFields.setString("$db", database);
+    sendRawCommand(host, port, 1, orderedIntCommand("ping", 1, pingFields, ["$db"]));
 
+    // Warm up the runtime with one lightweight read so later state loads are less surprising.
     try {
-        sendRawCommand(host, port, 2, orderedCommand("find", "app_meta", {
-            filter: { "_id": "app-meta" },
-            limit: 1,
-            singleBatch: true,
-            "$db": database
-        }, ["filter", "limit", "singleBatch", "$db"]));
+        let filter: JsonObject = objectOf({});
+        filter.setString("_id", "app-meta");
+        let findFields: JsonObject = objectOf({});
+        findFields.setObject("filter", filter);
+        findFields.setInt("limit", 1);
+        findFields.setBool("singleBatch", true);
+        findFields.setString("$db", database);
+        sendRawCommand(host, port, 2, orderedStringCommand("find", "app_meta", findFields, ["filter", "limit", "singleBatch", "$db"]));
     } catch (primeError) {
     }
 }
@@ -265,6 +270,7 @@ export class MongoClient {
         return maybeStream as TcpStream;
     }
 
+    // Reuse one authenticated socket per client instance to keep request latency down.
     private openStream(): TcpStream {
         if (this.streamOpen) {
             return this.streamState as TcpStream;
@@ -296,7 +302,7 @@ export class MongoClient {
         mongoRuntimePrimed = 1;
     }
 
-    private readMessage(stream: TcpStream): any {
+    private readMessage(stream: TcpStream): JsonObject {
         let headerBytes: Optional<int[]> = stream.readExactBytes(16);
         if (headerBytes == None) {
             throw new Error("MongoDB did not return a message header");
@@ -325,27 +331,28 @@ export class MongoClient {
             throw new Error("Unsupported MongoDB section kind " + String(sectionKind));
         }
 
-        let document: any = decodeDocumentFromReader(payloadReader);
-        document["_responseId"] = responseId;
-        document["_responseTo"] = responseTo;
-        document["_flags"] = flagBits;
+        let document: JsonObject = decodeDocumentFromReader(payloadReader);
+        document.setInt("_responseId", responseId);
+        document.setInt("_responseTo", responseTo);
+        document.setInt("_flags", flagBits);
         return document;
     }
 
-    private sendCommandOnStream(stream: TcpStream, command: any, database: string): any {
-        let commandBody: any = withDatabase(command, database);
+    private sendCommandOnStream(stream: TcpStream, command: JsonObject, database: string): JsonObject {
+        let commandBody: JsonObject = withDatabase(command, database);
         return this.sendPayloadOnStream(stream, commandBody, None, None);
     }
 
+    // Send either a plain command body or a command plus sequence payload documents.
     private sendPayloadOnStream(
         stream: TcpStream,
-        commandBody: any,
-        sequenceName: any,
-        sequenceDocuments: any
-    ): any {
+        commandBody: JsonObject,
+        sequenceName: Optional<string>,
+        sequenceDocuments: Optional<JsonObject[]>
+    ): JsonObject {
         let requestId: int = this.nextRequestId();
-        let bodyDocument: int[] = commandBody["_bsonOrder"] != None
-            ? encodeDocumentWithKeys(commandBody, commandBody["_bsonOrder"] as string[])
+        let bodyDocument: int[] = commandBody.has("_bsonOrder")
+            ? encodeDocumentWithKeys(commandBody, commandBody.stringArray("_bsonOrder"))
             : encodeDocument(commandBody);
         let stableBodyDocument: int[] = binary.concat([bodyDocument]);
 
@@ -355,7 +362,8 @@ export class MongoClient {
         payloadWriter.writeBytes(stableBodyDocument);
 
         if (sequenceName != None && sequenceDocuments != None) {
-            let docs: any[] = sequenceDocuments as any[];
+            // Bulk write commands encode extra documents in a second OP_MSG section.
+            let docs: JsonObject[] = sequenceDocuments as JsonObject[];
             let sequenceWriter: ByteWriter = binary.writer();
             sequenceWriter.writeCString(sequenceName as string);
             for (let i: int = 0; i < docs.length(); i++) {
@@ -381,7 +389,7 @@ export class MongoClient {
             throw new Error("Failed to write MongoDB command to " + this.address());
         }
 
-        let response: any = this.readMessage(stream);
+        let response: JsonObject = this.readMessage(stream);
         if (!okValue(response)) {
             throw commandError(response);
         }
@@ -389,6 +397,7 @@ export class MongoClient {
         return response;
     }
 
+    // Run the SCRAM handshake only when credentials are configured.
     private authenticateStream(stream: TcpStream): void {
         if (!this.needsAuthentication()) {
             return;
@@ -404,43 +413,46 @@ export class MongoClient {
         }
 
         let nonce: string = generateScramNonce(username + ":" + this.address() + ":" + String(this.requestId));
-        let start: any = buildScramStart(username, nonce);
-        let startResponse: any = this.sendCommandOnStream(stream, orderedCommand("saslStart", 1, {
-            mechanism: "SCRAM-SHA-256",
-            payload: bsonBinary(binary.fromString(start["message"] as string)),
-            autoAuthorize: 1,
-            options: {
-                skipEmptyExchange: true
-            }
-        }, ["mechanism", "payload", "autoAuthorize", "options"]), authDatabase);
+        let start: JsonObject = buildScramStart(username, nonce);
+        let startOptions: JsonObject = objectOf({});
+        startOptions.setBool("skipEmptyExchange", true);
+        let startFields: JsonObject = objectOf({});
+        startFields.setString("mechanism", "SCRAM-SHA-256");
+        startFields.setObject("payload", bsonBinary(binary.fromString(start.string("message"))));
+        startFields.setInt("autoAuthorize", 1);
+        startFields.setObject("options", startOptions);
+        let startResponse: JsonObject = this.sendCommandOnStream(stream, orderedIntCommand("saslStart", 1, startFields, ["mechanism", "payload", "autoAuthorize", "options"]), authDatabase);
 
-        let conversationId: int = startResponse["conversationId"] as int;
-        let serverFirstMessage: string = binaryPayloadToText(startResponse["payload"]);
-        let next: any = buildScramContinue(
+        let conversationId: int = startResponse.int("conversationId");
+        let startPayloadValue: Optional<JsonObject> = startResponse.object("payload");
+        let serverFirstMessage: string = binaryPayloadToText(startPayloadValue as JsonObject);
+        let next: JsonObject = buildScramContinue(
             username,
             password,
-            start["clientFirstBare"] as string,
+            start.string("clientFirstBare"),
             serverFirstMessage
         );
 
-        let continueResponse: any = this.sendCommandOnStream(stream, orderedCommand("saslContinue", 1, {
-            conversationId: conversationId,
-            payload: bsonBinary(binary.fromString(next["message"] as string))
-        }, ["conversationId", "payload"]), authDatabase);
+        let continueFields: JsonObject = objectOf({});
+        continueFields.setInt("conversationId", conversationId);
+        continueFields.setObject("payload", bsonBinary(binary.fromString(next.string("message"))));
+        let continueResponse: JsonObject = this.sendCommandOnStream(stream, orderedIntCommand("saslContinue", 1, continueFields, ["conversationId", "payload"]), authDatabase);
 
-        validateScramFinal(binaryPayloadToText(continueResponse["payload"]), next["serverSignature"] as string);
-        if (!boolValue(continueResponse["done"], false)) {
-            let finalResponse: any = this.sendCommandOnStream(stream, orderedCommand("saslContinue", 1, {
-                conversationId: conversationId,
-                payload: bsonBinary([])
-            }, ["conversationId", "payload"]), authDatabase);
+        let continuePayloadValue: Optional<JsonObject> = continueResponse.object("payload");
+        validateScramFinal(binaryPayloadToText(continuePayloadValue as JsonObject), next.string("serverSignature"));
+        if (!continueResponse.boolOr("done", false)) {
+            let finalFields: JsonObject = objectOf({});
+            finalFields.setInt("conversationId", conversationId);
+            finalFields.setObject("payload", bsonBinary([]));
+            let finalResponse: JsonObject = this.sendCommandOnStream(stream, orderedIntCommand("saslContinue", 1, finalFields, ["conversationId", "payload"]), authDatabase);
 
-            let finalMessage: string = binaryPayloadToText(finalResponse["payload"]);
+            let finalPayloadValue: Optional<JsonObject> = finalResponse.object("payload");
+            let finalMessage: string = binaryPayloadToText(finalPayloadValue as JsonObject);
             if (finalMessage != "") {
-                validateScramFinal(finalMessage, next["serverSignature"] as string);
+                validateScramFinal(finalMessage, next.string("serverSignature"));
             }
 
-            if (!boolValue(finalResponse["done"], false)) {
+            if (!finalResponse.boolOr("done", false)) {
                 throw new Error("MongoDB authentication conversation did not complete");
             }
         }
@@ -453,10 +465,10 @@ export class MongoClient {
         this.authDatabaseName = authDatabase;
     }
 
-    private runCommand(command: any, database: string): any {
+    private runCommand(command: JsonObject, database: string): JsonObject {
         try {
             let streamValue: TcpStream = this.openStream();
-            let response: any = this.sendCommandOnStream(streamValue, command, database);
+            let response: JsonObject = this.sendCommandOnStream(streamValue, command, database);
             return response;
         } catch (error) {
             if (this.streamOpen) {
@@ -468,12 +480,12 @@ export class MongoClient {
         }
     }
 
-    private runCommandWithSequence(command: any, database: string, sequenceName: string, sequenceDocuments: any[]): any {
-        let commandBody: any = withDatabase(command, database);
+    private runCommandWithSequence(command: JsonObject, database: string, sequenceName: string, sequenceDocuments: JsonObject[]): JsonObject {
+        let commandBody: JsonObject = withDatabase(command, database);
 
         try {
             let streamValue: TcpStream = this.openStream();
-            let response: any = this.sendPayloadOnStream(streamValue, commandBody, sequenceName, sequenceDocuments);
+            let response: JsonObject = this.sendPayloadOnStream(streamValue, commandBody, sequenceName, sequenceDocuments);
             return response;
         } catch (error) {
             if (this.streamOpen) {
@@ -485,44 +497,45 @@ export class MongoClient {
         }
     }
 
-    command(command: any): any {
+    command(command: JsonObject): JsonObject {
         return this.runCommand(command, stableText(this.databaseNameValue));
     }
 
-    commandOnDatabase(command: any, database: string): any {
+    commandOnDatabase(command: JsonObject, database: string): JsonObject {
         return this.runCommand(command, stableText(database));
     }
 
     ping(): void {
-        this.command(orderedCommand("ping", 1));
+        this.command(orderedIntCommand("ping", 1));
     }
 
-    find(collection: string, filter: any): any[] {
-        let response: any = this.command(orderedCommand("find", collection, {
-            filter: filter
-        }, ["filter"]));
+    find(collection: string, filter: JsonObject): JsonObject[] {
+        let findFields: JsonObject = objectOf({});
+        findFields.setObject("filter", filter);
+        let response: JsonObject = this.command(orderedStringCommand("find", collection, findFields, ["filter"]));
 
-        let cursor: any = response["cursor"];
-        if (cursor == None || cursor["firstBatch"] == None) {
+        let cursorValue: Optional<JsonObject> = response.object("cursor");
+        if (cursorValue == None) {
             return [];
         }
 
-        return cursor["firstBatch"] as any[];
+        let cursor: JsonObject = cursorValue as JsonObject;
+        return cursor.objectArray("firstBatch");
     }
 
-    findOne(collection: string, filter: any): any {
-        let response: any = this.command(orderedCommand("find", collection, {
-            filter: filter,
-            limit: 1,
-            singleBatch: true
-        }, ["filter", "limit", "singleBatch"]));
+    findOne(collection: string, filter: JsonObject): Optional<JsonObject> {
+        let findFields: JsonObject = objectOf({});
+        findFields.setObject("filter", filter);
+        findFields.setInt("limit", 1);
+        findFields.setBool("singleBatch", true);
+        let response: JsonObject = this.command(orderedStringCommand("find", collection, findFields, ["filter", "limit", "singleBatch"]));
 
-        let cursor: any = response["cursor"];
-        if (cursor == None || cursor["firstBatch"] == None) {
+        let cursorValue: Optional<JsonObject> = response.object("cursor");
+        if (cursorValue == None) {
             return None;
         }
 
-        let docs: any[] = cursor["firstBatch"] as any[];
+        let docs: JsonObject[] = (cursorValue as JsonObject).objectArray("firstBatch");
         if (docs.length() == 0) {
             return None;
         }
@@ -530,36 +543,40 @@ export class MongoClient {
         return docs[0];
     }
 
-    insertOne(collection: string, document: any): any {
+    insertOne(collection: string, document: JsonObject): JsonObject {
         return this.runCommandWithSequence(
-            orderedCommand("insert", collection),
+            orderedStringCommand("insert", collection),
             stableText(this.databaseNameValue),
             "documents",
             [withDocumentId(document)]
         );
     }
 
-    updateOne(collection: string, filter: any, setFields: any): any {
-        return this.runCommandWithSequence(orderedCommand("update", collection), stableText(this.databaseNameValue), "updates", [{
-            q: filter,
-            u: { "$set": setFields },
-            upsert: false
-        }]);
+    updateOne(collection: string, filter: JsonObject, setFields: JsonObject): JsonObject {
+        let setDocument: JsonObject = objectOf({});
+        setDocument.setObject("$set", setFields);
+        let updateDocument: JsonObject = objectOf({});
+        updateDocument.setObject("q", filter);
+        updateDocument.setObject("u", setDocument);
+        updateDocument.setBool("upsert", false);
+        return this.runCommandWithSequence(orderedStringCommand("update", collection), stableText(this.databaseNameValue), "updates", [updateDocument]);
     }
 
-    upsertOne(collection: string, filter: any, setFields: any): any {
-        return this.runCommandWithSequence(orderedCommand("update", collection), stableText(this.databaseNameValue), "updates", [{
-            q: filter,
-            u: { "$set": setFields },
-            upsert: true
-        }]);
+    upsertOne(collection: string, filter: JsonObject, setFields: JsonObject): JsonObject {
+        let setDocument: JsonObject = objectOf({});
+        setDocument.setObject("$set", setFields);
+        let updateDocument: JsonObject = objectOf({});
+        updateDocument.setObject("q", filter);
+        updateDocument.setObject("u", setDocument);
+        updateDocument.setBool("upsert", true);
+        return this.runCommandWithSequence(orderedStringCommand("update", collection), stableText(this.databaseNameValue), "updates", [updateDocument]);
     }
 
-    deleteOne(collection: string, filter: any): any {
-        return this.runCommandWithSequence(orderedCommand("delete", collection), stableText(this.databaseNameValue), "deletes", [{
-            q: filter,
-            limit: 1
-        }]);
+    deleteOne(collection: string, filter: JsonObject): JsonObject {
+        let deleteDocument: JsonObject = objectOf({});
+        deleteDocument.setObject("q", filter);
+        deleteDocument.setInt("limit", 1);
+        return this.runCommandWithSequence(orderedStringCommand("delete", collection), stableText(this.databaseNameValue), "deletes", [deleteDocument]);
     }
 
     close(): void {

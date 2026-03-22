@@ -1,6 +1,7 @@
+// Users CRUD handlers.
 import { Map } from "std:collections";
-import { parse } from "std:json";
 import { nowMs } from "std:time";
+import { JsonObject, objectOf, parseObject } from "../../../modules/json/index.tx";
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { findIdIndex, nextEntityId } from "../../core/ids.tx";
 import { jsonError } from "../../core/responses.tx";
@@ -10,12 +11,81 @@ import { AppOrder } from "../orders/model.tx";
 import { AppUser, UserCollection, userToPublicDocument, usersToDocument } from "./model.tx";
 import { deleteUser, getUser, insertUser, updateUser, userIndexByEmail } from "./repository.tx";
 
-function parseBody(body: string): any {
+class CreateUserPayload {
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+
+    constructor(name: string, email: string, password: string, role: string) {
+        this.name = name;
+        this.email = email;
+        this.password = password;
+        this.role = role;
+    }
+}
+
+class UpdateUserPayload {
+    hasName: bool;
+    name: string;
+    hasEmail: bool;
+    email: string;
+    hasRole: bool;
+    role: string;
+    hasPassword: bool;
+    password: string;
+
+    constructor(
+        hasName: bool,
+        name: string,
+        hasEmail: bool,
+        email: string,
+        hasRole: bool,
+        role: string,
+        hasPassword: bool,
+        password: string
+    ) {
+        this.hasName = hasName;
+        this.name = name;
+        this.hasEmail = hasEmail;
+        this.email = email;
+        this.hasRole = hasRole;
+        this.role = role;
+        this.hasPassword = hasPassword;
+        this.password = password;
+    }
+}
+
+function requireBody(body: string): string {
     if (body.trim() == "") {
         throw new Error("Request body is required");
     }
 
-    return parse(body);
+    return body;
+}
+
+function parseCreateUserPayload(body: string): CreateUserPayload {
+    let payload: JsonObject = parseObject(requireBody(body));
+    return new CreateUserPayload(
+        payload.string("name"),
+        payload.string("email"),
+        payload.string("password"),
+        payload.stringOr("role", "customer")
+    );
+}
+
+function parseUpdateUserPayload(body: string): UpdateUserPayload {
+    let payload: JsonObject = parseObject(requireBody(body));
+    return new UpdateUserPayload(
+        payload.has("name"),
+        payload.string("name"),
+        payload.has("email"),
+        payload.string("email"),
+        payload.has("role"),
+        payload.string("role"),
+        payload.has("password"),
+        payload.string("password")
+    );
 }
 
 function removeUserFromState(users: UserCollection, id: string): void {
@@ -24,8 +94,9 @@ function removeUserFromState(users: UserCollection, id: string): void {
         return;
     }
 
+    // Rebuild the collection so the deleted user disappears from both list and lookup map.
     let nextIds: string[] = [];
-    let nextItems = new Map<string, AppUser>();
+    let nextItems: Map<string, AppUser> = new Map<string, AppUser>();
 
     for (let i: int = 0; i < users.ids.length(); i++) {
         let userId: string = users.ids[i];
@@ -60,26 +131,26 @@ export function handleUsersCollection(method: string, body: string, state: AppSt
     let users: UserCollection = state.users;
 
     if (method == "GET") {
-        return createJsonResponse(usersToDocument(users), 200);
+        return createJsonResponse(usersToDocument(users).toJSON(), 200);
     }
 
     if (method == "POST") {
         try {
-            let payload: any = parseBody(body);
-            if (payload["name"] == None || payload["email"] == None || payload["password"] == None) {
+            let payload: CreateUserPayload = parseCreateUserPayload(body);
+            if (payload.name == "" || payload.email == "" || payload.password == "") {
                 return jsonError("name, email and password are required", 400);
             }
 
-            let name: string = String(payload["name"]);
-            let email: string = String(payload["email"]);
-            let password: string = String(payload["password"]);
+            let name: string = payload.name;
+            let email: string = payload.email;
+            let password: string = payload.password;
             if (userIndexByEmail(users, email) >= 0) {
                 return jsonError("User email already exists", 409);
             }
 
-            let role: string = payload["role"] != None ? String(payload["role"]) : "customer";
+            let role: string = payload.role;
             let userId: string = nextEntityId("user", users.ids);
-            let user = new AppUser(
+            let user: AppUser = new AppUser(
                 userId,
                 name,
                 email,
@@ -88,12 +159,13 @@ export function handleUsersCollection(method: string, body: string, state: AppSt
                 nowMs()
             );
 
+            // Keep the in-memory state, Mongo collection, and audit trail aligned for the new user.
             users.ids.push(userId);
             users.items.set(userId, user);
             insertUser(state.client, user);
             recordAppEvent(state, "created", "user", userId);
             touchAppState(state);
-            return createJsonResponse(userToPublicDocument(user), 201);
+            return createJsonResponse(userToPublicDocument(user).toJSON(), 201);
         } catch (error) {
             return jsonError("Invalid JSON body", 400);
         }
@@ -111,40 +183,41 @@ export function handleUserItem(method: string, body: string, state: AppState, us
     let user: AppUser = userValue as AppUser;
 
     if (method == "GET") {
-        return createJsonResponse(userToPublicDocument(user), 200);
+        return createJsonResponse(userToPublicDocument(user).toJSON(), 200);
     }
 
     if (method == "PUT") {
         try {
-            let payload: any = parseBody(body);
-            if (payload["name"] != None) {
-                user.name = String(payload["name"]);
+            let payload: UpdateUserPayload = parseUpdateUserPayload(body);
+            if (payload.hasName) {
+                user.name = payload.name;
             }
-            if (payload["email"] != None) {
-                let email: string = String(payload["email"]);
+            if (payload.hasEmail) {
+                let email: string = payload.email;
                 let otherIndex: int = userIndexByEmail(state.users, email);
                 if (otherIndex >= 0 && state.users.ids[otherIndex] != userId) {
                     return jsonError("User email already exists", 409);
                 }
                 user.email = email;
             }
-            if (payload["role"] != None) {
-                user.role = String(payload["role"]);
+            if (payload.hasRole) {
+                user.role = payload.role;
             }
-            if (payload["password"] != None) {
-                user.password = String(payload["password"]);
+            if (payload.hasPassword) {
+                user.password = payload.password;
             }
 
             updateUser(state.client, userId, user);
             recordAppEvent(state, "updated", "user", userId);
             touchAppState(state);
-            return createJsonResponse(userToPublicDocument(user), 200);
+            return createJsonResponse(userToPublicDocument(user).toJSON(), 200);
         } catch (error) {
             return jsonError("Invalid JSON body", 400);
         }
     }
 
     if (method == "DELETE") {
+        // Prevent deleting users that still own orders so order history remains valid.
         if (hasOrders(state, userId)) {
             return jsonError("User has orders and cannot be deleted", 409);
         }
@@ -153,7 +226,10 @@ export function handleUserItem(method: string, body: string, state: AppState, us
         deleteUser(state.client, userId);
         recordAppEvent(state, "deleted", "user", userId);
         touchAppState(state);
-        return createJsonResponse({ deleted: true, id: userId }, 200);
+        let deletedBody: JsonObject = objectOf({});
+        deletedBody.setBool("deleted", true);
+        deletedBody.setString("id", userId);
+        return createJsonResponse(deletedBody, 200);
     }
 
     return jsonError("Method not allowed", 405);

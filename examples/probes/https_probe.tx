@@ -1,3 +1,4 @@
+// HTTPS smoke test for the shared HTTP module.
 import { getEnv } from "std:system";
 import { fetch } from "../../src/modules/http/index.tx";
 

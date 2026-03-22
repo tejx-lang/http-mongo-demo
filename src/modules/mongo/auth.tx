@@ -1,10 +1,13 @@
+// SCRAM-SHA-256 helpers used by the Mongo wire-protocol client during authentication.
 import std:binary;
 import { nowMs } from "std:time";
+import { JsonObject, objectOf } from "../json/index.tx";
 
 function u32(value: int64): int64 {
     return value & 4294967295;
 }
 
+// Bitwise helpers used by the SHA-256 round function.
 function rotr(value: int64, shift: int): int64 {
     return u32((value >> shift) | ((value << (32 - shift)) & 4294967295));
 }
@@ -86,6 +89,7 @@ function sha256Constants(): int64[] {
 }
 
 export function sha256(data: int[]): int[] {
+    // Pad the message exactly as SHA-256 expects: one 1-bit, zero padding, then the original bit length.
     let padded: int[] = copyBytes(data);
     let bitLength: int64 = (data.length() as int64) * 8;
 
@@ -104,6 +108,7 @@ export function sha256(data: int[]): int[] {
     ];
     let constants: int64[] = sha256Constants();
 
+    // Process the message in 512-bit chunks and update the rolling digest state.
     for (let offset: int = 0; offset < padded.length(); offset = offset + 64) {
         let words: int64[] = [];
         for (let i: int = 0; i < 16; i++) {
@@ -183,6 +188,7 @@ function normalizeKey(key: int[]): int[] {
     return out;
 }
 
+// HMAC mixes the key with two different pads before hashing the inner and outer messages.
 function xorPad(key: int[], value: int): int[] {
     let out: int[] = [];
     for (let i: int = 0; i < key.length(); i++) {
@@ -201,6 +207,7 @@ export function pbkdf2HmacSha256(password: int[], salt: int[], iterations: int, 
     let blockIndex: int = 1;
     let derived: int[] = [];
 
+    // PBKDF2 repeats HMAC blocks and XORs the chain together to slow brute-force attacks down.
     while (derived.length() < dkLen) {
         let u: int[] = hmacSha256(password, binary.concat([salt, int32BE(blockIndex)]));
         let t: int[] = copyBytes(u);
@@ -261,6 +268,7 @@ export function base64Encode(data: int[]): string {
 }
 
 export function base64Decode(text: string): int[] {
+    // Ignore whitespace so wrapped base64 payloads still decode cleanly.
     let clean: string = "";
     for (let i: int = 0; i < text.length(); i++) {
         let ch: string = text.substring(i, i + 1);
@@ -300,8 +308,9 @@ export function base64Decode(text: string): int[] {
     return out;
 }
 
-function parseScramFields(message: string): any {
-    let fields: any = {};
+function parseScramFields(message: string): JsonObject {
+    // SCRAM messages are comma-separated key/value pairs such as `r=...,s=...,i=...`.
+    let fields: JsonObject = objectOf({});
     let parts: string[] = message.split(",");
     for (let i: int = 0; i < parts.length(); i++) {
         let part: string = parts[i];
@@ -312,12 +321,13 @@ function parseScramFields(message: string): any {
 
         let key: string = part.substring(0, eq);
         let value: string = part.substring(eq + 1, part.length());
-        fields[key] = value;
+        fields.setString(key, value);
     }
     return fields;
 }
 
 function escapeUsername(username: string): string {
+    // SCRAM reserves `=` and `,`, so usernames must escape those characters.
     let out: string = "";
     for (let i: int = 0; i < username.length(); i++) {
         let ch: string = username.substring(i, i + 1);
@@ -333,6 +343,7 @@ function escapeUsername(username: string): string {
 }
 
 export function generateScramNonce(seedText: string): string {
+    // Mix a seed with the current time, hash it, then base64-encode it into a printable nonce.
     let digest: int[] = sha256(stringBytes(seedText + ":" + String(nowMs())));
     let encoded: string = base64Encode(digest);
     let out: string = "";
@@ -347,13 +358,14 @@ export function generateScramNonce(seedText: string): string {
     return out;
 }
 
-export function buildScramStart(username: string, nonce: string): any {
+export function buildScramStart(username: string, nonce: string): JsonObject {
+    // The first SCRAM message declares the client nonce and the normalized username.
     let clientFirstBare: string = "n=" + escapeUsername(username) + ",r=" + nonce;
-    return {
-        nonce: nonce,
-        clientFirstBare: clientFirstBare,
-        message: "n,," + clientFirstBare
-    };
+    let payload: JsonObject = objectOf({});
+    payload.setString("nonce", nonce);
+    payload.setString("clientFirstBare", clientFirstBare);
+    payload.setString("message", "n,," + clientFirstBare);
+    return payload;
 }
 
 function xorBytes(left: int[], right: int[]): int[] {
@@ -364,11 +376,12 @@ function xorBytes(left: int[], right: int[]): int[] {
     return out;
 }
 
-export function buildScramContinue(username: string, password: string, clientFirstBare: string, serverFirstMessage: string): any {
-    let serverFields: any = parseScramFields(serverFirstMessage);
-    let serverNonce: string = serverFields["r"] as string;
-    let saltText: string = serverFields["s"] as string;
-    let iterationText: string = serverFields["i"] as string;
+export function buildScramContinue(username: string, password: string, clientFirstBare: string, serverFirstMessage: string): JsonObject {
+    // Derive the proof and expected server signature from the server's salt, nonce, and iteration count.
+    let serverFields: JsonObject = parseScramFields(serverFirstMessage);
+    let serverNonce: string = serverFields.string("r");
+    let saltText: string = serverFields.string("s");
+    let iterationText: string = serverFields.string("i");
 
     if (serverNonce == "" || saltText == "" || iterationText == "") {
         throw new Error("Invalid SCRAM server-first-message");
@@ -388,60 +401,58 @@ export function buildScramContinue(username: string, password: string, clientFir
     let storedKey: int[] = sha256(clientKey);
     let serverKey: int[] = hmacSha256(saltedPassword, stringBytes("Server Key"));
 
+    // `c=biws` is the base64 form of the no-channel-binding flag used by this client.
     let clientFinalWithoutProof: string = "c=biws,r=" + serverNonce;
     let authMessage: string = clientFirstBare + "," + serverFirstMessage + "," + clientFinalWithoutProof;
     let clientSignature: int[] = hmacSha256(storedKey, stringBytes(authMessage));
     let clientProof: int[] = xorBytes(clientKey, clientSignature);
     let serverSignature: int[] = hmacSha256(serverKey, stringBytes(authMessage));
 
-    return {
-        message: clientFinalWithoutProof + ",p=" + base64Encode(clientProof),
-        serverSignature: base64Encode(serverSignature)
-    };
+    let payload: JsonObject = objectOf({});
+    payload.setString("message", clientFinalWithoutProof + ",p=" + base64Encode(clientProof));
+    payload.setString("serverSignature", base64Encode(serverSignature));
+    return payload;
 }
 
 export function validateScramFinal(serverFinalMessage: string, expectedServerSignature: string): void {
-    let fields: any = parseScramFields(serverFinalMessage);
-    if (fields["e"] != None) {
-        throw new Error(fields["e"] as string);
+    // The final SCRAM message either carries an error or the signature that proves the server knew the password.
+    let fields: JsonObject = parseScramFields(serverFinalMessage);
+    if (fields.has("e")) {
+        throw new Error(fields.string("e"));
     }
 
-    let signature: any = fields["v"];
-    if (signature == None) {
+    if (!fields.has("v")) {
         if (serverFinalMessage.trim() == "") {
             return;
         }
         throw new Error("Invalid SCRAM server-final-message");
     }
 
-    if ((signature as string) != expectedServerSignature) {
+    if (fields.string("v") != expectedServerSignature) {
         throw new Error("SCRAM server signature mismatch");
     }
 }
 
-export function binaryPayloadToText(payload: any): string {
+export function binaryPayloadToText(payload: JsonObject): string {
+    // Mongo wraps SASL payloads as BSON binary, but the SCRAM logic wants plain UTF-8 text.
     if (payload == None) {
         return "";
     }
 
-    if (typeof(payload) == "string") {
-        return payload as string;
-    }
-
-    if (typeof(payload) == "object" && payload["_bsonType"] == "binary" && payload["data"] != None) {
-        return bytesString(payload["data"] as int[]);
+    if (payload.string("_bsonType") == "binary" && payload.has("data")) {
+        return bytesString(payload.intArray("data"));
     }
 
     throw new Error("Unsupported SASL payload type");
 }
 
-export function binaryPayloadEquals(payload: any, expectedText: string): bool {
+export function binaryPayloadEquals(payload: JsonObject, expectedText: string): bool {
     if (payload == None) {
         return expectedText == "";
     }
 
-    if (typeof(payload) == "object" && payload["_bsonType"] == "binary" && payload["data"] != None) {
-        return bytesEqual(payload["data"] as int[], stringBytes(expectedText));
+    if (payload.string("_bsonType") == "binary" && payload.has("data")) {
+        return bytesEqual(payload.intArray("data"), stringBytes(expectedText));
     }
 
     return false;

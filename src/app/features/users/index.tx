@@ -1,5 +1,6 @@
+// Public users module surface.
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
-import { AppUser, UserCollection, userToPublicDocument, usersToDocument } from "./model.tx";
+import { AppUser, UserCollection, UserCollectionView, UserView, userToPublicDocument, usersToDocument } from "./model.tx";
 import { findUserByEmail, getUser, loadUsers, userIndexByEmail } from "./repository.tx";
 
 export function loadUserCollection(client: MongoDatabase): UserCollection {
@@ -27,10 +28,10 @@ export function hasUserEmail(users: UserCollection, email: string, excludeId: st
     return users.ids[index] != excludeId;
 }
 
-export function toUserView(user: AppUser): any {
+export function toUserView(user: AppUser): UserView {
     return userToPublicDocument(user);
 }
 
-export function toUsersView(users: UserCollection): any {
+export function toUsersView(users: UserCollection): UserCollectionView {
     return usersToDocument(users);
 }

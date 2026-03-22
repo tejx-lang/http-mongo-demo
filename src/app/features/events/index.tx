@@ -1,5 +1,6 @@
+// Public events module surface.
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
-import { AppEvent, EventCollection, eventToView, eventsToDocument } from "./model.tx";
+import { AppEvent, EventCollection, EventCollectionView, EventView, eventToView, eventsToDocument } from "./model.tx";
 import { insertEvent, loadEvents } from "./repository.tx";
 
 export function loadEventCollection(client: MongoDatabase): EventCollection {
@@ -14,10 +15,10 @@ export function saveEventRecord(client: MongoDatabase, event: AppEvent): void {
     insertEvent(client, event);
 }
 
-export function toEventView(event: AppEvent): any {
+export function toEventView(event: AppEvent): EventView {
     return eventToView(event);
 }
 
-export function toEventsView(events: EventCollection): any {
+export function toEventsView(events: EventCollection): EventCollectionView {
     return eventsToDocument(events);
 }

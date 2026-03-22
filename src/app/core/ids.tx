@@ -1,3 +1,4 @@
+// ID helpers shared by the CRUD handlers.
 import { nowMs } from "std:time";
 
 export function nextEntityId(prefix: string, ids: string[]): string {

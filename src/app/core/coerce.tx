@@ -1,3 +1,4 @@
+// Primitive coercion helpers for code paths that must tolerate loosely shaped values.
 export function stringValue(value: any, fallback: string = ""): string {
     if (value == None) {
         return fallback;

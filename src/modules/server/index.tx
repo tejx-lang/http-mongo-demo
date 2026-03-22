@@ -1,7 +1,10 @@
+// Lightweight HTTP server primitives used by the app router and handlers.
 import std:net;
 import std:binary;
+import { stringify } from "std:json";
 import { Map } from "std:collections";
 import { describeError } from "../errors/index.tx";
+import { JsonObject, objectOf } from "../json/index.tx";
 
 function parseDecimalInt(text: string): int {
     let digits: string = "0123456789";
@@ -47,6 +50,53 @@ function stableCopy(text: string): string {
     return binary.toString(binary.fromString(text));
 }
 
+function ansiEscape(): string {
+    return binary.toString([27]);
+}
+
+export function colorText(text: string, code: string): string {
+    let stableCode: string = stableText(code);
+    let stableValue: string = stableCopy(String(text));
+    return ansiEscape() + "[" + stableCode + "m" + stableValue + ansiEscape() + "[0m";
+}
+
+export function colorLabel(text: string, code: string): string {
+    return colorText("[" + text + "]", "1;" + code);
+}
+
+export function dimText(text: string): string {
+    return colorText(text, "2");
+}
+
+export function colorMethod(method: string): string {
+    let normalized: string = stableText(method).toUpperCase();
+    if (normalized == "GET") return colorText(normalized, "32");
+    if (normalized == "POST") return colorText(normalized, "36");
+    if (normalized == "PUT") return colorText(normalized, "33");
+    if (normalized == "PATCH") return colorText(normalized, "35");
+    if (normalized == "DELETE") return colorText(normalized, "31");
+    return colorText(normalized, "37");
+}
+
+export function colorStatus(status: int): string {
+    if (status >= 200 && status < 300) return colorText(String(status), "32");
+    if (status >= 300 && status < 400) return colorText(String(status), "36");
+    if (status >= 400 && status < 500) return colorText(String(status), "33");
+    if (status >= 500) return colorText(String(status), "31");
+    return colorText(String(status), "37");
+}
+
+export function colorRoute(routeName: string): string {
+    if (routeName == "not_found") {
+        return colorText(routeName, "31");
+    }
+    return colorText(routeName, "35");
+}
+
+export function colorPath(path: string): string {
+    return colorText(path, "37");
+}
+
 function parseHeaderLines(lines: string[], startIndex: int): Map<string, string> {
     let headers = new Map<string, string>();
     let i: int = startIndex;
@@ -89,6 +139,7 @@ export function readRawRequest(stream: TcpStream): string {
     let separator: int = -1;
     let headerComplete: bool = false;
     
+    // Read until the header terminator is present so we can determine the expected body size.
     while (!headerComplete) {
         let chunk: string = stream.receive(4096);
         if (chunk == "") {
@@ -126,6 +177,7 @@ export class Request {
     headers: Map<string, string>;
     body: string;
     
+    // Parse a raw HTTP request into a stable object the router can consume.
     constructor(raw: string) {
         this.method = "GET";
         this.rawPath = "/";
@@ -215,6 +267,7 @@ export class Response {
         return headerValue(this.headers, name);
     }
     
+    // Serialize the response back into HTTP/1.1 text and write it to the socket.
     send(stream: TcpStream): void {
         let statusText = statusTextForCode(this.status);
         if (this.status == 204) {
@@ -262,6 +315,7 @@ export class Server {
         this.listener = None;
     }
     
+    // This server handles one request per connection and always closes after sending a response.
     private handleConnection(stream: TcpStream, handler: (req: Request) => Response): void {
         try {
             let raw: string = readRawRequest(stream);
@@ -276,11 +330,11 @@ export class Server {
             stream.close();
         } catch (error) {
             let detail: string = describeError(error);
-            print("server_request_error=", detail);
-            let res = createJsonResponse({
-                error: "Internal server error",
-                detail: detail
-            }, 500);
+            print(colorLabel("server", "31"), dimText("request_error"), colorText(detail, "31"));
+            let errorBody: JsonObject = objectOf({});
+            errorBody.setString("error", "Internal server error");
+            errorBody.setString("detail", detail);
+            let res = createJsonResponse(errorBody, 500);
             res.send(stream);
             stream.close();
         }
@@ -324,10 +378,10 @@ function statusTextForCode(status: int): string {
     return "OK";
 }
 
-export function createJsonResponse(data: any, status: int): Response {
+export function createJsonResponse(data: JsonObject, status: int): Response {
     let r = new Response();
     r.status = status;
-    r.body = stringify(data);
+    r.body = stringify(data.toJSON());
     return r;
 }
 

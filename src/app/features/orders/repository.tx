@@ -1,11 +1,14 @@
+// Mongo persistence for orders.
 import { cloneWithoutMongoFields, deleteDocument, insertDocument, updateDocument } from "../../core/persistence.tx";
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 import { AppOrder, OrderCollection, orderFromDocument, orderToDocument } from "./model.tx";
 
 export function loadOrders(client: MongoDatabase): OrderCollection {
-    let orders = new OrderCollection();
-    let documents: any[] = client.find("orders", {});
+    let orders: OrderCollection = new OrderCollection();
+    let documents: JsonObject[] = client.find("orders", objectOf({}));
 
+    // Rebuild the keyed in-memory collection from the stored Mongo documents.
     for (let i: int = 0; i < documents.length(); i++) {
         let orderValue: Optional<AppOrder> = orderFromDocument(cloneWithoutMongoFields(documents[i]));
         if (orderValue == None) {
@@ -25,11 +28,11 @@ export function getOrder(orders: OrderCollection, id: string): Optional<AppOrder
 }
 
 export function insertOrder(client: MongoDatabase, order: AppOrder): void {
-    insertDocument(client, "orders", orderToDocument(order));
+    insertDocument(client, "orders", orderToDocument(order).toJSON());
 }
 
 export function updateOrder(client: MongoDatabase, id: string, order: AppOrder): void {
-    updateDocument(client, "orders", id, orderToDocument(order));
+    updateDocument(client, "orders", id, orderToDocument(order).toJSON());
 }
 
 export function deleteOrder(client: MongoDatabase, id: string): void {

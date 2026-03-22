@@ -1,19 +1,63 @@
+// Reporting endpoint that summarizes the current in-memory application state.
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
+import { MetaDocument } from "../meta/model.tx";
 import { toMetaView } from "../meta/index.tx";
 import { totalRevenue } from "../orders/index.tx";
+import { ProductCollectionView } from "../products/model.tx";
 import { lowStockProductsView } from "../products/index.tx";
 
-function databaseSummary(state: AppState): any {
-    return {
-        users: state.users.ids.length(),
-        products: state.products.ids.length(),
-        orders: state.orders.ids.length(),
-        events: state.events.ids.length(),
-        revenue: totalRevenue(state.orders),
-        lowStock: lowStockProductsView(state.products)
-    };
+// Summary object used by `/health` and `/api/reports/summary`.
+class DatabaseSummaryView {
+    users: int;
+    products: int;
+    orders: int;
+    events: int;
+    revenue: float;
+    lowStock: ProductCollectionView;
+
+    constructor(state: AppState) {
+        this.users = state.users.ids.length();
+        this.products = state.products.ids.length();
+        this.orders = state.orders.ids.length();
+        this.events = state.events.ids.length();
+        this.revenue = totalRevenue(state.orders);
+        this.lowStock = lowStockProductsView(state.products);
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setInt("users", this.users);
+        out.setInt("products", this.products);
+        out.setInt("orders", this.orders);
+        out.setInt("events", this.events);
+        out.setFloat("revenue", this.revenue);
+        out.setObject("lowStock", this.lowStock.toJSON());
+        return out;
+    }
+}
+
+// Response envelope returned by the reports endpoint.
+class SummaryResponseView {
+    database: MetaDocument;
+    summary: DatabaseSummaryView;
+    storage: string;
+
+    constructor(database: MetaDocument, summary: DatabaseSummaryView, storage: string) {
+        this.database = database;
+        this.summary = summary;
+        this.storage = storage;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setObject("database", this.database.toJSON());
+        out.setObject("summary", this.summary.toJSON());
+        out.setString("storage", this.storage);
+        return out;
+    }
 }
 
 export function handleSummary(method: string, storageName: string, state: AppState): Response {
@@ -21,9 +65,9 @@ export function handleSummary(method: string, storageName: string, state: AppSta
         return jsonError("Method not allowed", 405);
     }
 
-    return createJsonResponse({
-        database: toMetaView(state.meta),
-        summary: databaseSummary(state),
-        storage: storageName
-    }, 200);
+    return createJsonResponse(new SummaryResponseView(
+        toMetaView(state.meta),
+        new DatabaseSummaryView(state),
+        storageName
+    ).toJSON(), 200);
 }

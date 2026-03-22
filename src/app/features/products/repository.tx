@@ -1,11 +1,14 @@
+// Mongo persistence for products.
 import { cloneWithoutMongoFields, deleteDocument, insertDocument, updateDocument } from "../../core/persistence.tx";
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 import { AppProduct, ProductCollection, productFromDocument, productToDocument } from "./model.tx";
 
 export function loadProducts(client: MongoDatabase): ProductCollection {
-    let products = new ProductCollection();
-    let documents: any[] = client.find("products", {});
+    let products: ProductCollection = new ProductCollection();
+    let documents: JsonObject[] = client.find("products", objectOf({}));
 
+    // Rebuild the keyed in-memory collection from the stored Mongo documents.
     for (let i: int = 0; i < documents.length(); i++) {
         let productValue: Optional<AppProduct> = productFromDocument(cloneWithoutMongoFields(documents[i]));
         if (productValue == None) {
@@ -25,11 +28,11 @@ export function getProduct(products: ProductCollection, id: string): Optional<Ap
 }
 
 export function insertProduct(client: MongoDatabase, product: AppProduct): void {
-    insertDocument(client, "products", productToDocument(product));
+    insertDocument(client, "products", productToDocument(product).toJSON());
 }
 
 export function updateProduct(client: MongoDatabase, id: string, product: AppProduct): void {
-    updateDocument(client, "products", id, productToDocument(product));
+    updateDocument(client, "products", id, productToDocument(product).toJSON());
 }
 
 export function deleteProduct(client: MongoDatabase, id: string): void {

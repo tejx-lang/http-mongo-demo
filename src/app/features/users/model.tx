@@ -1,6 +1,16 @@
+// User domain types plus persistence and response shapes.
 import { Map } from "std:collections";
-import { int64Value, stringValue } from "../../core/coerce.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 
+function cloneStrings(values: string[]): string[] {
+    let out: string[] = [];
+    for (let i: int = 0; i < values.length(); i++) {
+        out.push(values[i]);
+    }
+    return out;
+}
+
+// Internal user record used inside AppState.
 export class AppUser {
     id: string;
     name: string;
@@ -19,6 +29,64 @@ export class AppUser {
     }
 }
 
+// Shape written to Mongo.
+export class UserDocument {
+    id: string;
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+    createdAt: int64;
+
+    constructor(user: AppUser) {
+        this.id = user.id;
+        this.name = user.name;
+        this.email = user.email;
+        this.password = user.password;
+        this.role = user.role;
+        this.createdAt = user.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("name", this.name);
+        out.setString("email", this.email);
+        out.setString("password", this.password);
+        out.setString("role", this.role);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// Shape returned to API callers.
+export class UserView {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    createdAt: int64;
+
+    constructor(user: AppUser) {
+        this.id = user.id;
+        this.name = user.name;
+        this.email = user.email;
+        this.role = user.role;
+        this.createdAt = user.createdAt;
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("id", this.id);
+        out.setString("name", this.name);
+        out.setString("email", this.email);
+        out.setString("role", this.role);
+        out.setInt64("createdAt", this.createdAt);
+        return out;
+    }
+}
+
+// In-memory keyed collection used during one request.
 export class UserCollection {
     ids: string[];
     items: Map<string, AppUser>;
@@ -29,57 +97,72 @@ export class UserCollection {
     }
 }
 
-export function userToDocument(user: AppUser): any {
-    return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        password: user.password,
-        role: user.role,
-        createdAt: user.createdAt
-    };
+// Serializable list view returned by user endpoints.
+export class UserCollectionView {
+    count: int;
+    ids: string[];
+    items: Map<string, UserView>;
+
+    constructor() {
+        this.count = 0;
+        this.ids = [];
+        this.items = new Map<string, UserView>();
+    }
+
+    toJSON(): JsonObject {
+        let items: JsonObject = objectOf({});
+        for (let i: int = 0; i < this.ids.length(); i++) {
+            let userId: string = this.ids[i];
+            let userValue: Optional<UserView> = this.items.get(userId);
+            if (userValue != None) {
+                items.setObject(userId, (userValue as UserView).toJSON());
+            }
+        }
+
+        let out: JsonObject = objectOf({});
+        out.setInt("count", this.count);
+        out.setStringArray("ids", cloneStrings(this.ids));
+        out.setObject("items", items);
+        return out;
+    }
 }
 
-export function userFromDocument(document: any): Optional<AppUser> {
-    let id: string = stringValue(document["id"] != None ? document["id"] : document["_id"]);
+export function userToDocument(user: AppUser): UserDocument {
+    return new UserDocument(user);
+}
+
+export function userFromDocument(document: JsonObject): Optional<AppUser> {
+    let id: string = document.stringOr("id", document.string("_id"));
     if (id == "") {
         return None;
     }
 
     return new AppUser(
         id,
-        stringValue(document["name"]),
-        stringValue(document["email"]),
-        stringValue(document["password"]),
-        stringValue(document["role"], "customer"),
-        int64Value(document["createdAt"], 0)
+        document.string("name"),
+        document.string("email"),
+        document.string("password"),
+        document.stringOr("role", "customer"),
+        document.int64Or("createdAt", 0)
     );
 }
 
-export function userToPublicDocument(user: AppUser): any {
-    return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        createdAt: user.createdAt
-    };
+export function userToPublicDocument(user: AppUser): UserView {
+    return new UserView(user);
 }
 
-export function usersToDocument(users: UserCollection): any {
-    let items: any = {};
+export function usersToDocument(users: UserCollection): UserCollectionView {
+    let view: UserCollectionView = new UserCollectionView();
+    view.count = users.ids.length();
+    view.ids = cloneStrings(users.ids);
 
     for (let i: int = 0; i < users.ids.length(); i++) {
         let userId: string = users.ids[i];
         let userValue: Optional<AppUser> = users.items.get(userId);
         if (userValue != None) {
-            items[userId] = userToPublicDocument(userValue as AppUser);
+            view.items.set(userId, userToPublicDocument(userValue as AppUser));
         }
     }
 
-    return {
-        count: users.ids.length(),
-        ids: users.ids,
-        items: items
-    };
+    return view;
 }

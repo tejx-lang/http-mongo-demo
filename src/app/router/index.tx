@@ -1,4 +1,7 @@
-import { Request, Response, createJsonResponse, stableBody, stableMethod, stablePath } from "../../modules/server/index.tx";
+// Central route registry. This file matches paths and hands requests to feature modules.
+import { nowMs } from "std:time";
+import { JsonObject, objectOf } from "../../modules/json/index.tx";
+import { Request, Response, colorLabel, colorMethod, colorPath, colorRoute, colorStatus, createJsonResponse, dimText, stableBody, stableMethod, stablePath } from "../../modules/server/index.tx";
 import { MongoDatabase } from "../../modules/mongo/index.tx";
 import { jsonError } from "../core/responses.tx";
 import { AppState } from "../core/state.tx";
@@ -54,6 +57,16 @@ class RouteMatch {
     }
 }
 
+class DispatchResult {
+    routeName: string;
+    response: Response;
+
+    constructor(routeName: string, response: Response) {
+        this.routeName = routeName;
+        this.response = response;
+    }
+}
+
 function exactRoute(name: string, path: string, methods: string[]): RouteDefinition {
     return new RouteDefinition(name, "exact", path, methods);
 }
@@ -77,6 +90,7 @@ function publicRoutes(): RouteDefinition[] {
     ];
 }
 
+// Routes in this group need a freshly loaded AppState because they read or mutate Mongo-backed data.
 function stateRoutes(): RouteDefinition[] {
     return [
         exactRoute("health", "/health", ["GET"]),
@@ -159,29 +173,30 @@ function methodAllowed(route: RouteDefinition, method: string): bool {
 }
 
 function methodNotAllowed(route: RouteDefinition): Response {
-    return createJsonResponse({
-        error: "Method not allowed",
-        allowed: route.methods
-    }, 405);
+    let body: JsonObject = objectOf({});
+    body.setString("error", "Method not allowed");
+    body.setStringArray("allowed", route.methods);
+    return createJsonResponse(body, 405);
 }
 
 function welcomeResponse(): Response {
-    return createJsonResponse({
-        message: "Welcome to TejX REST API",
-        version: "1.0.0",
-        endpoints: [
-            "/health",
-            "/api/auth/login",
-            "/api/users",
-            "/api/products",
-            "/api/orders",
-            "/api/reports/summary",
-            "/api/events",
-            "/api/external"
-        ]
-    }, 200);
+    let body: JsonObject = objectOf({});
+    body.setString("message", "Welcome to TejX REST API");
+    body.setString("version", "1.0.0");
+    body.setStringArray("endpoints", [
+        "/health",
+        "/api/auth/login",
+        "/api/users",
+        "/api/products",
+        "/api/orders",
+        "/api/reports/summary",
+        "/api/events",
+        "/api/external"
+    ]);
+    return createJsonResponse(body, 200);
 }
 
+// Public routes can be served without loading the application state from Mongo.
 function runPublicRoute(match: RouteMatch, ctx: RequestContext): Response {
     if (match.route.name == "home") {
         return welcomeResponse();
@@ -194,6 +209,7 @@ function runPublicRoute(match: RouteMatch, ctx: RequestContext): Response {
     return jsonError("Route not found", 404);
 }
 
+// Stateful routes receive the current in-memory snapshot assembled from Mongo collections.
 function runStateRoute(match: RouteMatch, ctx: RequestContext, state: AppState): Response {
     if (match.route.name == "health" || match.route.name == "summary") {
         return handleReportsSummaryRoute(ctx.method, ctx.storageName, state);
@@ -238,7 +254,7 @@ function runStateRoute(match: RouteMatch, ctx: RequestContext, state: AppState):
     return jsonError("Route not found", 404);
 }
 
-function dispatchPublicRoutes(ctx: RequestContext): Optional<Response> {
+function dispatchPublicRoutes(ctx: RequestContext): Optional<DispatchResult> {
     let matchValue: Optional<RouteMatch> = findRouteMatch(publicRoutes(), ctx.path);
     if (matchValue == None) {
         return None;
@@ -246,13 +262,13 @@ function dispatchPublicRoutes(ctx: RequestContext): Optional<Response> {
 
     let match: RouteMatch = matchValue as RouteMatch;
     if (!methodAllowed(match.route, ctx.method)) {
-        return methodNotAllowed(match.route);
+        return new DispatchResult(match.route.name, methodNotAllowed(match.route));
     }
 
-    return runPublicRoute(match, ctx);
+    return new DispatchResult(match.route.name, runPublicRoute(match, ctx));
 }
 
-function dispatchStateRoutes(ctx: RequestContext): Optional<Response> {
+function dispatchStateRoutes(ctx: RequestContext): Optional<DispatchResult> {
     let matchValue: Optional<RouteMatch> = findRouteMatch(stateRoutes(), ctx.path);
     if (matchValue == None) {
         return None;
@@ -260,35 +276,53 @@ function dispatchStateRoutes(ctx: RequestContext): Optional<Response> {
 
     let match: RouteMatch = matchValue as RouteMatch;
     if (!methodAllowed(match.route, ctx.method)) {
-        return methodNotAllowed(match.route);
+        return new DispatchResult(match.route.name, methodNotAllowed(match.route));
     }
 
+    // Delay the load until after routing so public endpoints avoid unnecessary database work.
     let state: AppState = loadAppState(ctx.database);
-    return runStateRoute(match, ctx, state);
+    return new DispatchResult(match.route.name, runStateRoute(match, ctx, state));
 }
 
-export function dispatchRequest(ctx: RequestContext): Response {
-    let publicResponse: Optional<Response> = dispatchPublicRoutes(ctx);
+export function dispatchRequest(ctx: RequestContext): DispatchResult {
+    let publicResponse: Optional<DispatchResult> = dispatchPublicRoutes(ctx);
     if (publicResponse != None) {
-        return publicResponse as Response;
+        return publicResponse as DispatchResult;
     }
 
-    let stateResponse: Optional<Response> = dispatchStateRoutes(ctx);
+    let stateResponse: Optional<DispatchResult> = dispatchStateRoutes(ctx);
     if (stateResponse != None) {
-        return stateResponse as Response;
+        return stateResponse as DispatchResult;
     }
 
-    return jsonError("Route not found", 404);
+    return new DispatchResult("not_found", jsonError("Route not found", 404));
+}
+
+function logRouteResult(ctx: RequestContext, result: DispatchResult, startedAt: int64): void {
+    let durationMs: int64 = nowMs() - startedAt;
+    print(
+        colorLabel("route", "34"),
+        colorMethod(ctx.method),
+        colorPath(ctx.path),
+        dimText("->"),
+        colorRoute(result.routeName),
+        colorStatus(result.response.status),
+        dimText("+" + String(durationMs) + "ms")
+    );
 }
 
 export function handleRequest(req: Request, storageName: string, database: MongoDatabase): Response {
-    return dispatchRequest(new RequestContext(
+    let startedAt: int64 = nowMs();
+    let ctx: RequestContext = new RequestContext(
         stableMethod(req),
         stablePath(req),
         stableBody(req),
         storageName,
         database
-    ));
+    );
+    let result: DispatchResult = dispatchRequest(ctx);
+    logRouteResult(ctx, result, startedAt);
+    return result.response;
 }
 
 export function createAppHandler(storageName: string, database: MongoDatabase): (req: Request) => Response {

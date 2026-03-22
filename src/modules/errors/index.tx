@@ -1,6 +1,8 @@
+// Error formatting helpers that turn unknown runtime values into printable diagnostics.
 import { stringify } from "std:json";
 
 function safeString(value: any): string {
+    // Error inspection itself should never crash the logger.
     try {
         return String(value);
     } catch (error) {
@@ -16,12 +18,21 @@ function safeJson(value: any): string {
     }
 }
 
-function readField(target: any, name: string): any {
+function readField<T>(target: any, name: string): Optional<T> {
+    // Some runtime values throw when indexed, so field reads stay defensive.
     try {
-        return target[name];
+        let value: any = target[name];
+        if (value == None) {
+            return None;
+        }
+        return value as T;
     } catch (error) {
         return None;
     }
+}
+
+function readDynamicField(target: any, name: string): Optional<any> {
+    return readField<any>(target, name);
 }
 
 function append(parts: string[], label: string, value: string): void {
@@ -32,6 +43,7 @@ function append(parts: string[], label: string, value: string): void {
 }
 
 function describeScalar(value: any): string {
+    // Scalars can usually be rendered directly without structural inspection.
     let kind: string = typeof(value);
     if (value == None) {
         return "null";
@@ -54,12 +66,13 @@ function describeScalar(value: any): string {
 }
 
 function describeFunction(value: any): string {
+    // Functions are summarized by type, name, and whatever string form the runtime exposes.
     let parts: string[] = [];
     append(parts, "type", typeof(value));
 
-    let nameValue: any = readField(value, "name");
+    let nameValue: Optional<string> = readField<string>(value, "name");
     if (nameValue != None) {
-        append(parts, "name", safeString(nameValue));
+        append(parts, "name", safeString(nameValue as string));
     }
 
     let rendered: string = safeString(value);
@@ -75,6 +88,7 @@ function describeFunction(value: any): string {
 }
 
 function describeObject(value: any): string {
+    // Objects get a richer description: common error fields, constructor info, JSON, and raw keys.
     let parts: string[] = [];
     append(parts, "type", typeof(value));
 
@@ -85,6 +99,7 @@ function describeObject(value: any): string {
         append(parts, "string", rendered);
     }
 
+    // Prefer common error fields first so logs show the likely cause near the front.
     let fieldNames: string[] = [
         "name",
         "message",
@@ -100,30 +115,32 @@ function describeObject(value: any): string {
 
     for (let i: int = 0; i < fieldNames.length(); i++) {
         let fieldName: string = fieldNames[i];
-        let fieldValue: any = readField(value, fieldName);
+        let fieldValue: Optional<any> = readDynamicField(value, fieldName);
         if (fieldValue == None) {
             continue;
         }
 
-        if (typeof(fieldValue) == "object" || typeof(fieldValue) == "function") {
-            let serialized: string = safeJson(fieldValue);
+        let inspectedField: any = fieldValue as any;
+        if (typeof(inspectedField) == "object" || typeof(inspectedField) == "function") {
+            let serialized: string = safeJson(inspectedField);
             if (serialized != "" && serialized != "{}") {
                 append(parts, fieldName, serialized);
             } else {
-                append(parts, fieldName, safeString(fieldValue));
+                append(parts, fieldName, safeString(inspectedField));
             }
         } else {
-            append(parts, fieldName, describeScalar(fieldValue));
+            append(parts, fieldName, describeScalar(inspectedField));
         }
     }
 
-    let constructorValue: any = readField(value, "constructor");
+    let constructorValue: Optional<any> = readDynamicField(value, "constructor");
     if (constructorValue != None) {
-        let constructorName: any = readField(constructorValue, "name");
+        let constructorTarget: any = constructorValue as any;
+        let constructorName: Optional<string> = readField<string>(constructorTarget, "name");
         if (constructorName != None) {
-            append(parts, "constructor", safeString(constructorName));
+            append(parts, "constructor", safeString(constructorName as string));
         } else {
-            let constructorText: string = safeString(constructorValue);
+            let constructorText: string = safeString(constructorTarget);
             if (constructorText != "") {
                 append(parts, "constructor", constructorText);
             }
@@ -139,16 +156,18 @@ function describeObject(value: any): string {
     append(parts, "keys", safeJson(keys));
 
     if (keys.length() > 0) {
+        // Fall back to enumerating raw fields when named error properties were not descriptive enough.
         let fieldPairs: string[] = [];
         for (let i: int = 0; i < keys.length(); i++) {
             let key: string = keys[i];
-            let item: any = readField(value, key);
-            let itemKind: string = typeof(item);
-            if (item == None) {
+            let itemValue: Optional<any> = readDynamicField(value, key);
+            if (itemValue == None) {
                 fieldPairs.push(key + "=null");
                 continue;
             }
 
+            let item: any = itemValue as any;
+            let itemKind: string = typeof(item);
             if (itemKind == "object") {
                 let itemJson: string = safeJson(item);
                 if (itemJson != "" && itemJson != "{}") {
@@ -160,9 +179,9 @@ function describeObject(value: any): string {
             }
 
             if (itemKind == "function") {
-                let functionName: any = readField(item, "name");
+                let functionName: Optional<string> = readField<string>(item, "name");
                 if (functionName != None) {
-                    fieldPairs.push(key + "=<function " + safeString(functionName) + ">");
+                    fieldPairs.push(key + "=<function " + safeString(functionName as string) + ">");
                 } else {
                     fieldPairs.push(key + "=<function>");
                 }
@@ -185,6 +204,7 @@ function describeObject(value: any): string {
 }
 
 export function describeError(error: any): string {
+    // Pick the most descriptive formatting path based on the runtime type.
     if (error == None) {
         return "type=null value=null";
     }

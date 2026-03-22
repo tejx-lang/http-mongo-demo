@@ -1,6 +1,8 @@
+// Low-level HTTP client implementation used by the public HTTP module.
 import std:net;
 import { parse, stringify } from "std:json";
 import { Map } from "std:collections";
+import { JsonObject, objectOf } from "../json/index.tx";
 
 function parseDecimalInt(text: string): int {
     let digits: string = "0123456789";
@@ -45,6 +47,7 @@ function decodeChunkedBody(body: string): string {
     let cursor: int = 0;
     let keepDecoding: bool = true;
 
+    // Some upstreams stream bodies in chunks, so normalize them into one plain body string.
     while (keepDecoding) {
         let pending: string = body.substring(cursor, body.length());
         let lineEnd: int = pending.indexOf("\r\n");
@@ -148,6 +151,7 @@ export class Url {
     fragment: string;
     resource: string;
 
+    // Parse a URL once so the request path, host header, scheme, and port are easy to reuse.
     constructor(url: string) {
         this.raw = url;
         this.scheme = "";
@@ -242,6 +246,7 @@ export class HttpClientResponse {
     headers: Map<string, string>;
     body: string;
 
+    // Split the raw HTTP response into status line, headers, and body.
     constructor(rawResponse: string) {
         this.httpVersion = "HTTP/1.1";
         this.status = 0;
@@ -292,17 +297,18 @@ export class HttpClientResponse {
         return this.status >= 200 && this.status < 300;
     }
 
-    json(): any {
+    json(): JsonObject {
         if (this.body.trim() == "") {
-            return {};
+            return objectOf({});
         }
-        return parse(this.body);
+        return objectOf(parse(this.body));
     }
 }
 
 function buildRequest(method: string, url: Url, body: string, headers: Map<string, string>): string {
     let request: string = method.toUpperCase() + " " + url.resource + " HTTP/1.1\r\n";
 
+    // Fill in the standard HTTP headers callers usually expect by default.
     if (headerValue(headers, "host") == "") {
         request = request + "Host: " + url.hostHeader + "\r\n";
     }
@@ -358,6 +364,7 @@ export class HttpClient {
         this.insecureTls = insecureTls;
     }
 
+    // Open the right kind of socket for the URL scheme before sending the HTTP payload.
     private connect(parsedUrl: Url): TcpStream {
         let port: int = parseDecimalInt(parsedUrl.port);
         if (port <= 0) {
@@ -382,6 +389,7 @@ export class HttpClient {
         return maybeStream as TcpStream;
     }
 
+    // Build one request, send it, then parse the full raw response.
     request(method: string, url: string, body: string, headers: Map<string, string>): HttpClientResponse {
         let parsedUrl: Url = new Url(url);
         if (parsedUrl.scheme != this.scheme) {
@@ -404,7 +412,7 @@ export class HttpClient {
         return new HttpClientResponse(rawResponse);
     }
 
-    requestJson(method: string, url: string, payload: any, headers: Map<string, string>): HttpClientResponse {
+    requestJson(method: string, url: string, payload: JsonObject, headers: Map<string, string>): HttpClientResponse {
         let mergedHeaders: Map<string, string> = createJsonHeaders();
         let customHeaders: Map<string, string> = copyHeaders(headers);
         let keys: string[] = customHeaders.keys();
@@ -412,7 +420,7 @@ export class HttpClient {
             let key: string = keys[i];
             mergedHeaders.set(key, headerValue(customHeaders, key));
         }
-        return this.request(method, url, stringify(payload), mergedHeaders);
+        return this.request(method, url, stringify(payload.toJSON()), mergedHeaders);
     }
 
     get(url: string): HttpClientResponse {
@@ -455,15 +463,15 @@ export class HttpClient {
         return this.request("DELETE", url, "", headers);
     }
 
-    postJson(url: string, payload: any): HttpClientResponse {
+    postJson(url: string, payload: JsonObject): HttpClientResponse {
         return this.requestJson("POST", url, payload, createHeaders());
     }
 
-    putJson(url: string, payload: any): HttpClientResponse {
+    putJson(url: string, payload: JsonObject): HttpClientResponse {
         return this.requestJson("PUT", url, payload, createHeaders());
     }
 
-    patchJson(url: string, payload: any): HttpClientResponse {
+    patchJson(url: string, payload: JsonObject): HttpClientResponse {
         return this.requestJson("PATCH", url, payload, createHeaders());
     }
 
@@ -507,15 +515,15 @@ export class HttpClient {
         return this.deleteWithHeaders(url, headers).body;
     }
 
-    postJsonSync(url: string, payload: any): string {
+    postJsonSync(url: string, payload: JsonObject): string {
         return this.postJson(url, payload).body;
     }
 
-    putJsonSync(url: string, payload: any): string {
+    putJsonSync(url: string, payload: JsonObject): string {
         return this.putJson(url, payload).body;
     }
 
-    patchJsonSync(url: string, payload: any): string {
+    patchJsonSync(url: string, payload: JsonObject): string {
         return this.patchJson(url, payload).body;
     }
 }
@@ -546,7 +554,7 @@ export function httpRequest(method: string, url: string, body: string, headers: 
     return http.request(method, url, body, headers);
 }
 
-export function httpRequestJson(method: string, url: string, payload: any, headers: Map<string, string>): HttpClientResponse {
+export function httpRequestJson(method: string, url: string, payload: JsonObject, headers: Map<string, string>): HttpClientResponse {
     return http.requestJson(method, url, payload, headers);
 }
 
@@ -570,26 +578,26 @@ export function httpDeleteSync(url: string): string {
     return http.deleteSync(url);
 }
 
-export function httpPostJson(url: string, payload: any): HttpClientResponse {
+export function httpPostJson(url: string, payload: JsonObject): HttpClientResponse {
     return http.postJson(url, payload);
 }
 
-export function httpPutJson(url: string, payload: any): HttpClientResponse {
+export function httpPutJson(url: string, payload: JsonObject): HttpClientResponse {
     return http.putJson(url, payload);
 }
 
-export function httpPatchJson(url: string, payload: any): HttpClientResponse {
+export function httpPatchJson(url: string, payload: JsonObject): HttpClientResponse {
     return http.patchJson(url, payload);
 }
 
-export function httpPostJsonSync(url: string, payload: any): string {
+export function httpPostJsonSync(url: string, payload: JsonObject): string {
     return http.postJsonSync(url, payload);
 }
 
-export function httpPutJsonSync(url: string, payload: any): string {
+export function httpPutJsonSync(url: string, payload: JsonObject): string {
     return http.putJsonSync(url, payload);
 }
 
-export function httpPatchJsonSync(url: string, payload: any): string {
+export function httpPatchJsonSync(url: string, payload: JsonObject): string {
     return http.patchJsonSync(url, payload);
 }

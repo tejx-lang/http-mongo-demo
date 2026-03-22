@@ -1,3 +1,4 @@
+// Portable Mongo connection settings shared between the public and internal client layers.
 export class MongoConnectionConfig {
     uri: string;
     host: string;

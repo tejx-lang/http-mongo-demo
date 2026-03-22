@@ -1,6 +1,7 @@
+// Products CRUD handlers.
 import { Map } from "std:collections";
-import { parse } from "std:json";
 import { nowMs } from "std:time";
+import { JsonObject, objectOf, parseObject } from "../../../modules/json/index.tx";
 import { Response, createJsonResponse } from "../../../modules/server/index.tx";
 import { findIdIndex, nextEntityId } from "../../core/ids.tx";
 import { jsonError } from "../../core/responses.tx";
@@ -10,12 +11,84 @@ import { AppOrder } from "../orders/model.tx";
 import { AppProduct, ProductCollection, productToView, productsToDocument } from "./model.tx";
 import { deleteProduct, getProduct, insertProduct, updateProduct } from "./repository.tx";
 
-function parseBody(body: string): any {
+class CreateProductPayload {
+    name: string;
+    price: float;
+    hasPrice: bool;
+    stock: int;
+    category: string;
+
+    constructor(name: string, price: float, hasPrice: bool, stock: int, category: string) {
+        this.name = name;
+        this.price = price;
+        this.hasPrice = hasPrice;
+        this.stock = stock;
+        this.category = category;
+    }
+}
+
+class UpdateProductPayload {
+    hasName: bool;
+    name: string;
+    hasPrice: bool;
+    price: float;
+    hasStock: bool;
+    stock: int;
+    hasCategory: bool;
+    category: string;
+
+    constructor(
+        hasName: bool,
+        name: string,
+        hasPrice: bool,
+        price: float,
+        hasStock: bool,
+        stock: int,
+        hasCategory: bool,
+        category: string
+    ) {
+        this.hasName = hasName;
+        this.name = name;
+        this.hasPrice = hasPrice;
+        this.price = price;
+        this.hasStock = hasStock;
+        this.stock = stock;
+        this.hasCategory = hasCategory;
+        this.category = category;
+    }
+}
+
+function requireBody(body: string): string {
     if (body.trim() == "") {
         throw new Error("Request body is required");
     }
 
-    return parse(body);
+    return body;
+}
+
+function parseCreateProductPayload(body: string): CreateProductPayload {
+    let payload: JsonObject = parseObject(requireBody(body));
+    return new CreateProductPayload(
+        payload.string("name"),
+        payload.floatOr("price", 0.0),
+        payload.has("price"),
+        payload.intOr("stock", 0),
+        payload.stringOr("category", "misc")
+    );
+}
+
+function parseUpdateProductPayload(body: string): UpdateProductPayload {
+    let payload: JsonObject = parseObject(requireBody(body));
+    return new UpdateProductPayload(
+        payload.has("name"),
+        payload.string("name"),
+        payload.has("price"),
+        payload.floatOr("price", 0.0),
+        payload.has("stock"),
+        payload.intOr("stock", 0),
+        payload.has("category"),
+        payload.string("category")
+    );
 }
 
 function removeProductFromState(products: ProductCollection, id: string): void {
@@ -24,8 +97,9 @@ function removeProductFromState(products: ProductCollection, id: string): void {
         return;
     }
 
+    // Rebuild the collection so the deleted product disappears from both list and lookup map.
     let nextIds: string[] = [];
-    let nextItems = new Map<string, AppProduct>();
+    let nextItems: Map<string, AppProduct> = new Map<string, AppProduct>();
 
     for (let i: int = 0; i < products.ids.length(); i++) {
         let productId: string = products.ids[i];
@@ -65,34 +139,33 @@ function productExistsInOrders(state: AppState, productId: string): bool {
 
 export function handleProductsCollection(method: string, body: string, state: AppState): Response {
     if (method == "GET") {
-        return createJsonResponse(productsToDocument(state.products), 200);
+        return createJsonResponse(productsToDocument(state.products).toJSON(), 200);
     }
 
     if (method == "POST") {
         try {
-            let payload: any = parseBody(body);
-            if (payload["name"] == None || payload["price"] == None) {
+            let payload: CreateProductPayload = parseCreateProductPayload(body);
+            if (payload.name == "" || !payload.hasPrice) {
                 return jsonError("name and price are required", 400);
             }
 
-            let stock: int = payload["stock"] != None ? parseFloat(String(payload["stock"])) as int : 0;
-            let category: string = payload["category"] != None ? String(payload["category"]) : "misc";
             let productId: string = nextEntityId("product", state.products.ids);
-            let product = new AppProduct(
+            let product: AppProduct = new AppProduct(
                 productId,
-                String(payload["name"]),
-                parseFloat(String(payload["price"])),
-                stock,
-                category,
+                payload.name,
+                payload.price,
+                payload.stock,
+                payload.category,
                 nowMs()
             );
 
+            // Keep in-memory state, Mongo, and the event log aligned for the new product.
             state.products.ids.push(productId);
             state.products.items.set(productId, product);
             insertProduct(state.client, product);
             recordAppEvent(state, "created", "product", productId);
             touchAppState(state);
-            return createJsonResponse(productToView(product), 201);
+            return createJsonResponse(productToView(product).toJSON(), 201);
         } catch (error) {
             return jsonError("Invalid JSON body", 400);
         }
@@ -110,35 +183,36 @@ export function handleProductItem(method: string, body: string, state: AppState,
     let product: AppProduct = productValue as AppProduct;
 
     if (method == "GET") {
-        return createJsonResponse(productToView(product), 200);
+        return createJsonResponse(productToView(product).toJSON(), 200);
     }
 
     if (method == "PUT") {
         try {
-            let payload: any = parseBody(body);
-            if (payload["name"] != None) {
-                product.name = String(payload["name"]);
+            let payload: UpdateProductPayload = parseUpdateProductPayload(body);
+            if (payload.hasName) {
+                product.name = payload.name;
             }
-            if (payload["price"] != None) {
-                product.price = parseFloat(String(payload["price"]));
+            if (payload.hasPrice) {
+                product.price = payload.price;
             }
-            if (payload["stock"] != None) {
-                product.stock = parseFloat(String(payload["stock"])) as int;
+            if (payload.hasStock) {
+                product.stock = payload.stock;
             }
-            if (payload["category"] != None) {
-                product.category = String(payload["category"]);
+            if (payload.hasCategory) {
+                product.category = payload.category;
             }
 
             updateProduct(state.client, productId, product);
             recordAppEvent(state, "updated", "product", productId);
             touchAppState(state);
-            return createJsonResponse(productToView(product), 200);
+            return createJsonResponse(productToView(product).toJSON(), 200);
         } catch (error) {
             return jsonError("Invalid JSON body", 400);
         }
     }
 
     if (method == "DELETE") {
+        // Products referenced by existing orders stay immutable so historical orders remain consistent.
         if (productExistsInOrders(state, productId)) {
             return jsonError("Product exists in orders and cannot be deleted", 409);
         }
@@ -147,7 +221,10 @@ export function handleProductItem(method: string, body: string, state: AppState,
         deleteProduct(state.client, productId);
         recordAppEvent(state, "deleted", "product", productId);
         touchAppState(state);
-        return createJsonResponse({ deleted: true, id: productId }, 200);
+        let deletedBody: JsonObject = objectOf({});
+        deletedBody.setBool("deleted", true);
+        deletedBody.setString("id", productId);
+        return createJsonResponse(deletedBody, 200);
     }
 
     return jsonError("Method not allowed", 405);

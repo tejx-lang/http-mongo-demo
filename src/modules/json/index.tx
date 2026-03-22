@@ -1,8 +1,309 @@
+// Shared JSON wrapper with typed accessors so app code does not index raw objects directly.
 import { jsonBoolean, jsonNumber, jsonString, jsonStringArray } from "./fields.tx";
 import { parseJson } from "./parser.tx";
 
-export function parse(text: string): any {
-    return parseJson(text);
+function stringValue(value: any, fallback: string = ""): string {
+    if (value == None) {
+        return fallback;
+    }
+    return String(value);
+}
+
+function intValue(value: any, fallback: int = 0): int {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return value as int;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1 : 0;
+    }
+
+    return parseFloat(String(value)) as int;
+}
+
+function int64Value(value: any, fallback: int64 = 0): int64 {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int64") {
+        return value as int64;
+    }
+    if (kind == "int" || kind == "int32") {
+        return value as int64;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int64;
+    }
+
+    return (parseFloat(String(value)) as int) as int64;
+}
+
+function floatValue(value: any, fallback: float = 0.0): float {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return value as float;
+    }
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return (value as int64) as float;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1.0 : 0.0;
+    }
+
+    return parseFloat(String(value));
+}
+
+function normalizeObjectValue(value: any): any {
+    if (value == None) {
+        return {};
+    }
+
+    // Accept domain/view objects and unwrap them into plain data before storing them.
+    if (typeof(value["toJSON"]) == "function") {
+        return value.toJSON();
+    }
+
+    return value;
+}
+
+export class JsonObject {
+    private values: any;
+
+    constructor(values: any) {
+        this.values = normalizeObjectValue(values);
+    }
+
+    private read<T>(key: string): Optional<T> {
+        let value: any = this.values[key];
+        if (value == None) {
+            return None;
+        }
+        return value as T;
+    }
+
+    private readRaw(key: string): Optional<any> {
+        return this.read<any>(key);
+    }
+
+    private readArray(key: string): Optional<any[]> {
+        return this.read<any[]>(key);
+    }
+
+    has(key: string): bool {
+        return this.values[key] != None;
+    }
+
+    kind(key: string): string {
+        let value: Optional<any> = this.readRaw(key);
+        if (value == None) {
+            return "None";
+        }
+        return typeof(value as any);
+    }
+
+    keys(): string[] {
+        return Object.keys(this.values);
+    }
+
+    string(key: string): string {
+        return stringValue(this.values[key], "");
+    }
+
+    stringOr(key: string, fallback: string): string {
+        return stringValue(this.values[key], fallback);
+    }
+
+    int(key: string): int {
+        return intValue(this.values[key], 0);
+    }
+
+    intOr(key: string, fallback: int): int {
+        return intValue(this.values[key], fallback);
+    }
+
+    int64(key: string): int64 {
+        return int64Value(this.values[key], 0);
+    }
+
+    int64Or(key: string, fallback: int64): int64 {
+        return int64Value(this.values[key], fallback);
+    }
+
+    float(key: string): float {
+        return floatValue(this.values[key], 0.0);
+    }
+
+    floatOr(key: string, fallback: float): float {
+        return floatValue(this.values[key], fallback);
+    }
+
+    bool(key: string): bool {
+        return this.boolOr(key, false);
+    }
+
+    boolOr(key: string, fallback: bool): bool {
+        let value: Optional<any> = this.readRaw(key);
+        if (value == None) {
+            return fallback;
+        }
+
+        let runtimeValue: any = value as any;
+        let kind: string = typeof(runtimeValue);
+        if (kind == "bool") {
+            return runtimeValue as bool;
+        }
+        if (kind == "int" || kind == "int32" || kind == "int64") {
+            return (runtimeValue as int64) != 0;
+        }
+        if (kind == "float" || kind == "float32" || kind == "float64") {
+            return (runtimeValue as float) != 0.0;
+        }
+        if (kind == "string") {
+            return (runtimeValue as string) != "";
+        }
+
+        return fallback;
+    }
+
+    // Nested objects may already be wrapped, so normalize them before returning another JsonObject.
+    object(key: string): Optional<JsonObject> {
+        let normalized: any = normalizeObjectValue(this.values[key]);
+        if (normalized == None || typeof(normalized) != "object") {
+            return None;
+        }
+        return new JsonObject(normalized);
+    }
+
+    objectArray(key: string): JsonObject[] {
+        let field: Optional<any[]> = this.readArray(key);
+        if (field == None) {
+            return [];
+        }
+
+        let out: JsonObject[] = [];
+        let values: any[] = field as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(new JsonObject(normalizeObjectValue(values[i])));
+        }
+        return out;
+    }
+
+    stringArray(key: string): string[] {
+        let field: Optional<any[]> = this.readArray(key);
+        if (field == None) {
+            return [];
+        }
+
+        let out: string[] = [];
+        let values: any[] = field as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(stringValue(values[i]));
+        }
+        return out;
+    }
+
+    intArray(key: string): int[] {
+        let field: Optional<any[]> = this.readArray(key);
+        if (field == None) {
+            return [];
+        }
+
+        let out: int[] = [];
+        let values: any[] = field as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(intValue(values[i], 0));
+        }
+        return out;
+    }
+
+    copyField(target: JsonObject, sourceKey: string, targetKey: string): void {
+        if (!this.has(sourceKey)) {
+            return;
+        }
+        target.values[targetKey] = this.values[sourceKey];
+    }
+
+    setString(key: string, value: string): void {
+        this.values[key] = value;
+    }
+
+    setInt(key: string, value: int): void {
+        this.values[key] = value;
+    }
+
+    setInt64(key: string, value: int64): void {
+        this.values[key] = value;
+    }
+
+    setFloat(key: string, value: float): void {
+        this.values[key] = value;
+    }
+
+    setBool(key: string, value: bool): void {
+        this.values[key] = value;
+    }
+
+    setStringArray(key: string, values: string[]): void {
+        this.values[key] = values;
+    }
+
+    setIntArray(key: string, values: int[]): void {
+        this.values[key] = values;
+    }
+
+    setObject(key: string, value: JsonObject): void {
+        this.values[key] = value.toJSON();
+    }
+
+    setObjectArray(key: string, values: JsonObject[]): void {
+        let out: any[] = [];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(values[i].toJSON());
+        }
+        this.values[key] = out;
+    }
+
+    remove(key: string): void {
+        let nextValues: any = {};
+        let keys: string[] = Object.keys(this.values);
+        for (let i: int = 0; i < keys.length(); i++) {
+            let currentKey: string = keys[i];
+            if (currentKey == key) {
+                continue;
+            }
+            nextValues[currentKey] = this.values[currentKey];
+        }
+        this.values = nextValues;
+    }
+
+    toJSON(): any {
+        return this.values;
+    }
+}
+
+export function parse(text: string): JsonObject {
+    return new JsonObject(parseJson(text));
+}
+
+export function parseObject(text: string): JsonObject {
+    return parse(text);
+}
+
+export function objectOf(value: any): JsonObject {
+    return new JsonObject(normalizeObjectValue(value));
 }
 
 export function readString(text: string, key: string): Optional<string> {

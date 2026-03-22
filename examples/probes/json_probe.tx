@@ -1,3 +1,4 @@
+// JSON/stringify probe used while debugging object rendering and nested collection shapes.
 import { stringify } from "std:json";
 
 function main() {

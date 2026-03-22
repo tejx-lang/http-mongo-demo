@@ -1,11 +1,14 @@
+// Mongo persistence for users.
 import { cloneWithoutMongoFields, deleteDocument, insertDocument, updateDocument } from "../../core/persistence.tx";
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
+import { JsonObject, objectOf } from "../../../modules/json/index.tx";
 import { AppUser, UserCollection, userFromDocument, userToDocument } from "./model.tx";
 
 export function loadUsers(client: MongoDatabase): UserCollection {
-    let users = new UserCollection();
-    let documents: any[] = client.find("users", {});
+    let users: UserCollection = new UserCollection();
+    let documents: JsonObject[] = client.find("users", objectOf({}));
 
+    // Rebuild the keyed in-memory collection from the stored Mongo documents.
     for (let i: int = 0; i < documents.length(); i++) {
         let userValue: Optional<AppUser> = userFromDocument(cloneWithoutMongoFields(documents[i]));
         if (userValue == None) {
@@ -49,11 +52,11 @@ export function userIndexByEmail(users: UserCollection, email: string): int {
 }
 
 export function insertUser(client: MongoDatabase, user: AppUser): void {
-    insertDocument(client, "users", userToDocument(user));
+    insertDocument(client, "users", userToDocument(user).toJSON());
 }
 
 export function updateUser(client: MongoDatabase, id: string, user: AppUser): void {
-    updateDocument(client, "users", id, userToDocument(user));
+    updateDocument(client, "users", id, userToDocument(user).toJSON());
 }
 
 export function deleteUser(client: MongoDatabase, id: string): void {

@@ -1,3 +1,4 @@
+// App state lifecycle helpers. This is where feature collections are assembled into one AppState.
 import { nowMs } from "std:time";
 import { nextEntityId } from "./ids.tx";
 import { AppState } from "./state.tx";
@@ -23,11 +24,13 @@ export function loadAppState(client: MongoDatabase): AppState {
     );
 }
 
+// Touch shared metadata whenever a write changes the visible state of the app.
 export function touchAppState(state: AppState): void {
     state.meta.updatedAt = nowMs();
     saveMetaState(state.client, state.meta);
 }
 
+// Record audit-style events beside business data so reports can explain recent mutations.
 export function recordAppEvent(state: AppState, action: string, entity: string, entityId: string): void {
     let eventId: string = nextEntityId("event", state.events.ids);
     let event = createEventRecord(eventId, action, entity, entityId, nowMs());

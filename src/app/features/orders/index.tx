@@ -1,5 +1,6 @@
+// Public orders module surface.
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
-import { AppOrder, OrderCollection, orderToView, ordersToDocument, totalOrderRevenue } from "./model.tx";
+import { AppOrder, OrderCollection, OrderCollectionView, OrderView, orderToView, ordersToDocument, totalOrderRevenue } from "./model.tx";
 import { getOrder, loadOrders } from "./repository.tx";
 
 export function loadOrderCollection(client: MongoDatabase): OrderCollection {
@@ -10,11 +11,11 @@ export function findOrder(orders: OrderCollection, id: string): Optional<AppOrde
     return getOrder(orders, id);
 }
 
-export function toOrderView(order: AppOrder): any {
+export function toOrderView(order: AppOrder): OrderView {
     return orderToView(order);
 }
 
-export function toOrdersView(orders: OrderCollection): any {
+export function toOrdersView(orders: OrderCollection): OrderCollectionView {
     return ordersToDocument(orders);
 }
 
