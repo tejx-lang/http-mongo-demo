@@ -1,7 +1,7 @@
 // Public HTTP module surface. Callers use this instead of talking to HttpClient directly.
 import { parse } from "std:json";
 import { Map } from "std:collections";
-import { JsonObject, objectOf } from "../json/index.tx";
+import { JsonObject, objectOf, jsonObject } from "../json/index.tx";
 import { HttpClient, HttpClientResponse, copyHeaders, createHeaders, createJsonHeaders } from "./client.tx";
 
 export class HttpRequest {
@@ -122,6 +122,33 @@ export function copyHttpHeaders(headers: Map<string, string>): Map<string, strin
     return copyHeaders(headers);
 }
 
+export function request(
+    method: string,
+    url: string,
+    body: string = "",
+    headers: Optional<Map<string, string>> = None,
+    insecureTls: bool = false
+): HttpResponse {
+    return fetch(url, createRequest(method, body, headers, insecureTls));
+}
+
+export function createJsonRequest(
+    method: string,
+    data: JsonObject,
+    insecureTls: bool = false
+): HttpRequest {
+    return createRequest(method, stringify(data.toJSON()), createJsonHeaders(), insecureTls);
+}
+
+export function requestJson(
+    method: string,
+    url: string,
+    data: JsonObject,
+    insecureTls: bool = false
+): HttpResponse {
+    return fetch(url, createJsonRequest(method, data, insecureTls));
+}
+
 export function fetch(url: string, config: Optional<HttpRequest> = None): HttpResponse {
     let method: string = requestMethod(config);
     let headers: Map<string, string> = requestHeaders(config);
@@ -137,14 +164,30 @@ export function post(url: string, body: string): HttpResponse {
     return fetch(url, createRequest("POST", body, createJsonHeaders()));
 }
 
+export function postJson(url: string, data: JsonObject): HttpResponse {
+    return requestJson("POST", url, data);
+}
+
 export function put(url: string, body: string): HttpResponse {
     return fetch(url, createRequest("PUT", body, createJsonHeaders()));
+}
+
+export function putJson(url: string, data: JsonObject): HttpResponse {
+    return requestJson("PUT", url, data);
 }
 
 export function patch(url: string, body: string): HttpResponse {
     return fetch(url, createRequest("PATCH", body, createJsonHeaders()));
 }
 
+export function patchJson(url: string, data: JsonObject): HttpResponse {
+    return requestJson("PATCH", url, data);
+}
+
 export function deleteRequest(url: string): HttpResponse {
     return fetch(url, createRequest("DELETE"));
+}
+
+export function deleteJson(url: string, data: JsonObject): HttpResponse {
+    return requestJson("DELETE", url, data);
 }

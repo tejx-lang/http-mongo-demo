@@ -32,6 +32,28 @@ export class MongoConnection {
         this.authDatabase = authDatabase;
         this.replicaSet = replicaSet;
     }
+
+    copy(): MongoConnection {
+        return createMongoConnection(
+            this.uri,
+            this.host,
+            this.port,
+            this.database,
+            this.username,
+            this.password,
+            this.authDatabase,
+            this.replicaSet
+        );
+    }
+
+    open(): MongoDatabase {
+        return new MongoDatabase(this);
+    }
+
+    warm(): MongoConnection {
+        warmMongoConnection(this);
+        return this;
+    }
 }
 
 export class MongoDatabase extends MongoClient {
@@ -125,23 +147,22 @@ export function createMongoConnection(
 }
 
 export function copyMongoConnection(connection: MongoConnection): MongoConnection {
-    return createMongoConnection(
-        connection.uri,
-        connection.host,
-        connection.port,
-        connection.database,
-        connection.username,
-        connection.password,
-        connection.authDatabase,
-        connection.replicaSet
-    );
+    return connection.copy();
 }
 
 export function connectMongo(connection: MongoConnection): MongoDatabase {
-    return new MongoDatabase(connection);
+    return connection.open();
 }
 
 export function warmMongoConnection(connection: MongoConnection): void {
     let internal: MongoConnectionConfig = cloneConnectionConfig(toInternalConnection(connection));
     primeMongoConnection(internal);
+}
+
+export function openMongo(connection: MongoConnection): MongoDatabase {
+    return connection.open();
+}
+
+export function openMongoUrl(uri: string): MongoDatabase {
+    return createMongoConnection(uri).open();
 }

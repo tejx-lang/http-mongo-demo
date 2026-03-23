@@ -2,7 +2,7 @@
 import { MongoDatabase } from "../../modules/mongo/index.tx";
 import { AppState } from "../core/state.tx";
 
-class AppRuntimeState {
+export class AppRuntime {
     database: MongoDatabase;
     storageName: string;
     state: AppState;
@@ -14,27 +14,33 @@ class AppRuntimeState {
     }
 }
 
-let runtimeState: Optional<AppRuntimeState> = None;
+let runtimeState: Optional<AppRuntime> = None;
 
-export function initializeAppRuntime(database: MongoDatabase, storageName: string, state: AppState): void {
-    runtimeState = new AppRuntimeState(database, storageName, state);
+export function setAppRuntime(database: MongoDatabase, storageName: string, state: AppState): AppRuntime {
+    let runtime: AppRuntime = new AppRuntime(database, storageName, state);
+    runtimeState = runtime;
+    return runtime;
 }
 
-function requireRuntimeState(): AppRuntimeState {
+export function initializeAppRuntime(database: MongoDatabase, storageName: string, state: AppState): void {
+    setAppRuntime(database, storageName, state);
+}
+
+export function appRuntime(): AppRuntime {
     if (runtimeState == None) {
         throw new Error("Application runtime was not initialized");
     }
-    return runtimeState as AppRuntimeState;
+    return runtimeState as AppRuntime;
 }
 
 export function appDatabase(): MongoDatabase {
-    return requireRuntimeState().database;
+    return appRuntime().database;
 }
 
 export function appStorageName(): string {
-    return requireRuntimeState().storageName;
+    return appRuntime().storageName;
 }
 
 export function appState(): AppState {
-    return requireRuntimeState().state;
+    return appRuntime().state;
 }

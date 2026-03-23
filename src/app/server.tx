@@ -4,10 +4,10 @@ import { nowMs } from "std:time";
 import { resolvePort, resolveBaseUrl, resolveMongoConnection } from "./config/env.tx";
 import { ensureAppState, loadAppState } from "./core/store.tx";
 import { AppState } from "./core/state.tx";
-import { initializeAppRuntime } from "./runtime/index.tx";
-import { MongoConnection, MongoDatabase, connectMongo } from "../modules/mongo/index.tx";
+import { setAppRuntime } from "./runtime/index.tx";
+import { MongoConnection, MongoDatabase } from "../modules/mongo/index.tx";
 import { describeError } from "../modules/errors/index.tx";
-import { Server, colorLabel, colorText, dimText } from "../modules/server/index.tx";
+import { serve, colorLabel, colorText, dimText } from "../modules/server/index.tx";
 import { handleAppRequest, initializeAppRouter } from "./router/runtime.tx";
 
 class ApplicationSettings {
@@ -108,7 +108,7 @@ function resolveApplicationSettings(connection: MongoConnection): ApplicationSet
 // Bring the database online and ensure the expected app collections/documents exist.
 function createApplicationDatabase(connection: MongoConnection, progress: StartupProgress): MongoDatabase {
     progress.log("Connecting to MongoDB at " + connection.host + ":" + String(connection.port));
-    let database: MongoDatabase = connectMongo(connection);
+    let database: MongoDatabase = connection.open();
     progress.log("MongoDB connection established, ensuring app state");
     ensureAppState(database);
     progress.log("App state ready");
@@ -131,7 +131,7 @@ function createApplicationRuntime(progress: StartupProgress): ApplicationRuntime
     progress.log("Server will bind to " + settings.baseUrl);
     let database: MongoDatabase = createApplicationDatabase(connection, progress);
     let state: AppState = createApplicationState(database, progress);
-    initializeAppRuntime(database, settings.storageName, state);
+    setAppRuntime(database, settings.storageName, state);
     return new ApplicationRuntime(settings);
 }
 
@@ -150,8 +150,7 @@ function logStartup(runtime: ApplicationRuntime): void {
 function startApplicationServer(runtime: ApplicationRuntime, progress: StartupProgress): void {
     progress.log("Binding HTTP server on " + runtime.settings.address());
     initializeAppRouter();
-    let server = new Server();
-    server.listen(runtime.settings.address(), handleAppRequest);
+    serve(runtime.settings.address(), handleAppRequest);
 }
 
 export function runApplication(): void {

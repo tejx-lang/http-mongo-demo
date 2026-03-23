@@ -363,6 +363,11 @@ export class Server {
     }
 }
 
+export function serve(addr: string, handler: (req: Request) => Response): void {
+    let server: Server = new Server();
+    server.listen(addr, handler);
+}
+
 function statusTextForCode(status: int): string {
     if (status == 200) return "OK";
     if (status == 201) return "Created";

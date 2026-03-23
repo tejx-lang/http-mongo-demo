@@ -100,18 +100,23 @@ Public types and helpers:
 - `HttpRequest`
 - `HttpResponse`
 - `createRequest(...)`
+- `createJsonRequest(...)`
 - `createHttpHeaders()`
 - `createJsonRequestHeaders()`
 - `copyHttpHeaders(...)`
-- `fetch(...)`, `get(...)`, `post(...)`, `put(...)`, `patch(...)`, `deleteRequest(...)`
+- `request(...)`, `requestJson(...)`
+- `fetch(...)`, `get(...)`, `post(...)`, `postJson(...)`, `put(...)`, `putJson(...)`, `patch(...)`, `patchJson(...)`, `deleteRequest(...)`
 
 Example:
 
 ```tx
-import { createRequest, fetch } from "./src/modules/http/index.tx";
+import { get, postJson } from "./src/modules/http/index.tx";
+import { jsonObject } from "./src/modules/json/index.tx";
 
-let request = createRequest("GET");
-let response = fetch("https://api.github.com/users/tejx", request);
+let profile = get("https://api.github.com/users/tejx");
+let created = postJson("https://example.com/items", jsonObject({
+    name: "tejx"
+}));
 ```
 
 `http://` uses plain TCP. `https://` uses TLS from `std:net`.
@@ -126,12 +131,14 @@ Public types and helpers:
 - `createMongoConnection(...)`
 - `copyMongoConnection(...)`
 - `connectMongo(...)`
+- `openMongo(...)`
+- `openMongoUrl(...)`
 - `warmMongoConnection(...)`
 
 Example:
 
 ```tx
-import { connectMongo, createMongoConnection } from "./src/modules/mongo/index.tx";
+import { createMongoConnection, openMongoUrl } from "./src/modules/mongo/index.tx";
 
 let connection = createMongoConnection(
     "",
@@ -143,7 +150,8 @@ let connection = createMongoConnection(
     "admin",
     "rs0"
 );
-let client = connectMongo(connection);
+let client = connection.open();
+let fromUri = openMongoUrl("mongodb://root:password123@127.0.0.1:27017/rental-app?authSource=admin&replicaSet=rs0");
 ```
 
 Internal transport/auth/BSON implementation stays inside the module folder. Callers only need the public API from `index.tx`.
@@ -153,10 +161,11 @@ Internal transport/auth/BSON implementation stays inside the module folder. Call
 Use the JSON module through `src/modules/json/index.tx`:
 
 ```tx
-import { parse, readString } from "./src/modules/json/index.tx";
+import { jsonObject, parse, readString } from "./src/modules/json/index.tx";
 
 let data = parse("{\"name\":\"tejx\"}");
 let name = readString("{\"name\":\"tejx\"}", "name");
+let body = jsonObject({ name: "tejx" });
 ```
 
 ## API Routes

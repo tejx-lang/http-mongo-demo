@@ -1,12 +1,12 @@
 // Probe that talks to Mongo through the app's bootstrap and load paths.
 import { resolveMongoConnection } from "../../src/app/config/env.tx";
-import { MongoConnection, connectMongo } from "../../src/modules/mongo/index.tx";
+import { MongoConnection } from "../../src/modules/mongo/index.tx";
 import { ensureAppState, loadAppState } from "../../src/app/core/store.tx";
 import { AppState } from "../../src/app/core/state.tx";
 
 function main() {
     let connection: MongoConnection = resolveMongoConnection();
-    let client = connectMongo(connection);
+    let client = connection.open();
 
     print("resolved_host=", connection.host);
     print("resolved_port=", connection.port);

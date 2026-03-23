@@ -1,6 +1,6 @@
 // Shared Mongo persistence helpers used by feature repositories.
 import { resolveMongoConnection } from "../config/env.tx";
-import { MongoConnection, MongoDatabase, connectMongo, copyMongoConnection } from "../../modules/mongo/index.tx";
+import { MongoConnection, MongoDatabase } from "../../modules/mongo/index.tx";
 import { JsonObject, objectOf } from "../../modules/json/index.tx";
 
 let mongoConnectionState: Optional<MongoConnection> = None;
@@ -36,7 +36,7 @@ export function createMongoClient(): MongoDatabase {
         connection = resolveMongoConnection();
     }
 
-    return connectMongo(copyMongoConnection(connection as MongoConnection));
+    return (connection as MongoConnection).copy().open();
 }
 
 export function configureDatabaseConnection(connection: MongoConnection): void {

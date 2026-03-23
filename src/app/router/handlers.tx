@@ -1,7 +1,7 @@
 // Plain route handlers used directly by the app router.
 import { JsonObject, objectOf } from "../../modules/json/index.tx";
 import { Response, RouteContext, createJsonResponse } from "../../modules/server/index.tx";
-import { appState, appStorageName } from "../runtime/index.tx";
+import { AppRuntime, appRuntime } from "../runtime/index.tx";
 import { handleAuthRoute } from "../features/auth/index.tx";
 import { handleEventsRoute } from "../features/events/routes.tx";
 import { handleExternalRoute } from "../features/external/index.tx";
@@ -9,6 +9,10 @@ import { handleOrderRoute, handleOrdersRoute } from "../features/orders/routes.t
 import { handleProductRoute, handleProductsRoute } from "../features/products/routes.tx";
 import { handleReportsSummaryRoute } from "../features/reports/index.tx";
 import { handleUserRoute, handleUsersRoute } from "../features/users/routes.tx";
+
+function runtime(): AppRuntime {
+    return appRuntime();
+}
 
 export function handleWelcomeRoute(ctx: RouteContext): Response {
     let body: JsonObject = objectOf({});
@@ -32,43 +36,45 @@ export function handleExternalPageRoute(ctx: RouteContext): Response {
 }
 
 export function handleHealthRoute(ctx: RouteContext): Response {
-    return handleReportsSummaryRoute(ctx.method(), appStorageName(), appState());
+    let current: AppRuntime = runtime();
+    return handleReportsSummaryRoute(ctx.method(), current.storageName, current.state);
 }
 
 export function handleReportsSummaryPageRoute(ctx: RouteContext): Response {
-    return handleReportsSummaryRoute(ctx.method(), appStorageName(), appState());
+    let current: AppRuntime = runtime();
+    return handleReportsSummaryRoute(ctx.method(), current.storageName, current.state);
 }
 
 export function handleAuthLoginRoute(ctx: RouteContext): Response {
-    return handleAuthRoute(ctx.method(), ctx.body(), appState());
+    return handleAuthRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
 export function handleUsersCollectionPageRoute(ctx: RouteContext): Response {
-    return handleUsersRoute(ctx.method(), ctx.body(), appState());
+    return handleUsersRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
 export function handleUserItemPageRoute(ctx: RouteContext): Response {
-    return handleUserRoute(ctx.method(), ctx.body(), appState(), ctx.param("userId"));
+    return handleUserRoute(ctx.method(), ctx.body(), runtime().state, ctx.param("userId"));
 }
 
 export function handleProductsCollectionPageRoute(ctx: RouteContext): Response {
-    return handleProductsRoute(ctx.method(), ctx.body(), appState());
+    return handleProductsRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
 export function handleProductItemPageRoute(ctx: RouteContext): Response {
-    return handleProductRoute(ctx.method(), ctx.body(), appState(), ctx.param("productId"));
+    return handleProductRoute(ctx.method(), ctx.body(), runtime().state, ctx.param("productId"));
 }
 
 export function handleOrdersCollectionPageRoute(ctx: RouteContext): Response {
-    return handleOrdersRoute(ctx.method(), ctx.body(), appState());
+    return handleOrdersRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
 export function handleOrderItemPageRoute(ctx: RouteContext): Response {
-    return handleOrderRoute(ctx.method(), ctx.body(), appState(), ctx.param("orderId"));
+    return handleOrderRoute(ctx.method(), ctx.body(), runtime().state, ctx.param("orderId"));
 }
 
 export function handleEventsCollectionPageRoute(ctx: RouteContext): Response {
-    return handleEventsRoute(ctx.method(), appState());
+    return handleEventsRoute(ctx.method(), runtime().state);
 }
 
 export function handleSearchRoute(ctx: RouteContext): Response {

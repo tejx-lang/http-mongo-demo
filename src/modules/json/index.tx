@@ -306,6 +306,14 @@ export function objectOf(value: any): JsonObject {
     return new JsonObject(normalizeObjectValue(value));
 }
 
+export function jsonObject(value: any = {}): JsonObject {
+    return objectOf(value);
+}
+
+export function emptyObject(): JsonObject {
+    return objectOf({});
+}
+
 export function readString(text: string, key: string): Optional<string> {
     return jsonString(text, key);
 }
