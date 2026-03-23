@@ -5,7 +5,7 @@ import { resolvePort, resolveBaseUrl, resolveMongoConnection } from "./config/en
 import { ensureAppState, loadAppState } from "./core/store.tx";
 import { AppState } from "./core/state.tx";
 import { setAppRuntime } from "./runtime/index.tx";
-import { MongoConnection, MongoDatabase } from "../modules/mongo/index.tx";
+import { MongoConnection, MongoDatabase, openMongo } from "../modules/mongo/index.tx";
 import { describeError } from "../modules/errors/index.tx";
 import { serve, colorLabel, colorText, dimText } from "../modules/server/index.tx";
 import { handleAppRequest, initializeAppRouter } from "./router/runtime.tx";
@@ -108,7 +108,7 @@ function resolveApplicationSettings(connection: MongoConnection): ApplicationSet
 // Bring the database online and ensure the expected app collections/documents exist.
 function createApplicationDatabase(connection: MongoConnection, progress: StartupProgress): MongoDatabase {
     progress.log("Connecting to MongoDB at " + connection.host + ":" + String(connection.port));
-    let database: MongoDatabase = connection.open();
+    let database: MongoDatabase = openMongo(connection);
     progress.log("MongoDB connection established, ensuring app state");
     ensureAppState(database);
     progress.log("App state ready");

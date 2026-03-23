@@ -104,7 +104,7 @@ Public types and helpers:
 - `createHttpHeaders()`
 - `createJsonRequestHeaders()`
 - `copyHttpHeaders(...)`
-- `request(...)`, `requestJson(...)`
+- `send(...)`, `sendJson(...)`
 - `fetch(...)`, `get(...)`, `post(...)`, `postJson(...)`, `put(...)`, `putJson(...)`, `patch(...)`, `patchJson(...)`, `deleteRequest(...)`
 
 Example:

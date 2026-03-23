@@ -1,7 +1,7 @@
 // Public HTTP module surface. Callers use this instead of talking to HttpClient directly.
-import { parse } from "std:json";
+import { parse, stringify } from "std:json";
 import { Map } from "std:collections";
-import { JsonObject, objectOf, jsonObject } from "../json/index.tx";
+import { JsonObject, objectOf } from "../json/index.tx";
 import { HttpClient, HttpClientResponse, copyHeaders, createHeaders, createJsonHeaders } from "./client.tx";
 
 export class HttpRequest {
@@ -122,7 +122,22 @@ export function copyHttpHeaders(headers: Map<string, string>): Map<string, strin
     return copyHeaders(headers);
 }
 
-export function request(
+export function createJsonRequest(
+    method: string,
+    data: JsonObject,
+    insecureTls: bool = false
+): HttpRequest {
+    return createRequest(method, stringify(data.toJSON()), createJsonHeaders(), insecureTls);
+}
+
+export function fetch(url: string, config: Optional<HttpRequest> = None): HttpResponse {
+    let method: string = requestMethod(config);
+    let headers: Map<string, string> = requestHeaders(config);
+    let client: HttpClient = clientFor(url, config);
+    return wrapResponse(client.request(method, url, requestBody(config), headers));
+}
+
+export function send(
     method: string,
     url: string,
     body: string = "",
@@ -132,28 +147,13 @@ export function request(
     return fetch(url, createRequest(method, body, headers, insecureTls));
 }
 
-export function createJsonRequest(
-    method: string,
-    data: JsonObject,
-    insecureTls: bool = false
-): HttpRequest {
-    return createRequest(method, stringify(data.toJSON()), createJsonHeaders(), insecureTls);
-}
-
-export function requestJson(
+export function sendJson(
     method: string,
     url: string,
     data: JsonObject,
     insecureTls: bool = false
 ): HttpResponse {
     return fetch(url, createJsonRequest(method, data, insecureTls));
-}
-
-export function fetch(url: string, config: Optional<HttpRequest> = None): HttpResponse {
-    let method: string = requestMethod(config);
-    let headers: Map<string, string> = requestHeaders(config);
-    let client: HttpClient = clientFor(url, config);
-    return wrapResponse(client.request(method, url, requestBody(config), headers));
 }
 
 export function get(url: string): HttpResponse {
@@ -165,7 +165,7 @@ export function post(url: string, body: string): HttpResponse {
 }
 
 export function postJson(url: string, data: JsonObject): HttpResponse {
-    return requestJson("POST", url, data);
+    return sendJson("POST", url, data);
 }
 
 export function put(url: string, body: string): HttpResponse {
@@ -173,7 +173,7 @@ export function put(url: string, body: string): HttpResponse {
 }
 
 export function putJson(url: string, data: JsonObject): HttpResponse {
-    return requestJson("PUT", url, data);
+    return sendJson("PUT", url, data);
 }
 
 export function patch(url: string, body: string): HttpResponse {
@@ -181,7 +181,7 @@ export function patch(url: string, body: string): HttpResponse {
 }
 
 export function patchJson(url: string, data: JsonObject): HttpResponse {
-    return requestJson("PATCH", url, data);
+    return sendJson("PATCH", url, data);
 }
 
 export function deleteRequest(url: string): HttpResponse {
@@ -189,5 +189,5 @@ export function deleteRequest(url: string): HttpResponse {
 }
 
 export function deleteJson(url: string, data: JsonObject): HttpResponse {
-    return requestJson("DELETE", url, data);
+    return sendJson("DELETE", url, data);
 }
