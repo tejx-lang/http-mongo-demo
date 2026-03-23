@@ -2,11 +2,13 @@
 import std:binary;
 import { nowMs } from "std:time";
 import { resolvePort, resolveBaseUrl, resolveMongoConnection } from "./config/env.tx";
-import { ensureAppState } from "./core/store.tx";
+import { ensureAppState, loadAppState } from "./core/store.tx";
+import { AppState } from "./core/state.tx";
+import { initializeAppRuntime } from "./runtime/index.tx";
 import { MongoConnection, MongoDatabase, connectMongo } from "../modules/mongo/index.tx";
 import { describeError } from "../modules/errors/index.tx";
 import { Server, colorLabel, colorText, dimText } from "../modules/server/index.tx";
-import { createAppHandler } from "./router/index.tx";
+import { handleAppRequest, initializeAppRouter } from "./router/runtime.tx";
 
 class ApplicationSettings {
     host: string;
@@ -28,11 +30,9 @@ class ApplicationSettings {
 
 class ApplicationRuntime {
     settings: ApplicationSettings;
-    database: MongoDatabase;
     
-    constructor(settings: ApplicationSettings, database: MongoDatabase) {
+    constructor(settings: ApplicationSettings) {
         this.settings = settings;
-        this.database = database;
     }
 }
 
@@ -115,6 +115,13 @@ function createApplicationDatabase(connection: MongoConnection, progress: Startu
     return database;
 }
 
+function createApplicationState(database: MongoDatabase, progress: StartupProgress): AppState {
+    progress.log("Loading app state into shared runtime cache");
+    let state: AppState = loadAppState(database);
+    progress.log("Runtime state cache ready");
+    return state;
+}
+
 // Build the full runtime object in the same order the process boots.
 function createApplicationRuntime(progress: StartupProgress): ApplicationRuntime {
     progress.log("Resolving application configuration");
@@ -123,7 +130,9 @@ function createApplicationRuntime(progress: StartupProgress): ApplicationRuntime
     let settings: ApplicationSettings = resolveApplicationSettings(connection);
     progress.log("Server will bind to " + settings.baseUrl);
     let database: MongoDatabase = createApplicationDatabase(connection, progress);
-    return new ApplicationRuntime(settings, database);
+    let state: AppState = createApplicationState(database, progress);
+    initializeAppRuntime(database, settings.storageName, state);
+    return new ApplicationRuntime(settings);
 }
 
 // Emit the stable startup banner after the runtime is ready.
@@ -140,8 +149,9 @@ function logStartup(runtime: ApplicationRuntime): void {
 // Hand the server module a handler that always uses the same resolved runtime.
 function startApplicationServer(runtime: ApplicationRuntime, progress: StartupProgress): void {
     progress.log("Binding HTTP server on " + runtime.settings.address());
+    initializeAppRouter();
     let server = new Server();
-    server.listen(runtime.settings.address(), createAppHandler(runtime.settings.storageName, runtime.database));
+    server.listen(runtime.settings.address(), handleAppRequest);
 }
 
 export function runApplication(): void {

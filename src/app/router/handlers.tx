@@ -1,0 +1,82 @@
+// Plain route handlers used directly by the app router.
+import { JsonObject, objectOf } from "../../modules/json/index.tx";
+import { Response, RouteContext, createJsonResponse } from "../../modules/server/index.tx";
+import { appState, appStorageName } from "../runtime/index.tx";
+import { handleAuthRoute } from "../features/auth/index.tx";
+import { handleEventsRoute } from "../features/events/routes.tx";
+import { handleExternalRoute } from "../features/external/index.tx";
+import { handleOrderRoute, handleOrdersRoute } from "../features/orders/routes.tx";
+import { handleProductRoute, handleProductsRoute } from "../features/products/routes.tx";
+import { handleReportsSummaryRoute } from "../features/reports/index.tx";
+import { handleUserRoute, handleUsersRoute } from "../features/users/routes.tx";
+
+export function handleWelcomeRoute(ctx: RouteContext): Response {
+    let body: JsonObject = objectOf({});
+    body.setString("message", "Welcome to TejX REST API");
+    body.setString("version", "1.0.0");
+    body.setStringArray("endpoints", [
+        "/health",
+        "/api/auth/login",
+        "/api/users",
+        "/api/products",
+        "/api/orders",
+        "/api/reports/summary",
+        "/api/events",
+        "/api/external"
+    ]);
+    return createJsonResponse(body, 200);
+}
+
+export function handleExternalPageRoute(ctx: RouteContext): Response {
+    return handleExternalRoute(ctx.method());
+}
+
+export function handleHealthRoute(ctx: RouteContext): Response {
+    return handleReportsSummaryRoute(ctx.method(), appStorageName(), appState());
+}
+
+export function handleReportsSummaryPageRoute(ctx: RouteContext): Response {
+    return handleReportsSummaryRoute(ctx.method(), appStorageName(), appState());
+}
+
+export function handleAuthLoginRoute(ctx: RouteContext): Response {
+    return handleAuthRoute(ctx.method(), ctx.body(), appState());
+}
+
+export function handleUsersCollectionPageRoute(ctx: RouteContext): Response {
+    return handleUsersRoute(ctx.method(), ctx.body(), appState());
+}
+
+export function handleUserItemPageRoute(ctx: RouteContext): Response {
+    return handleUserRoute(ctx.method(), ctx.body(), appState(), ctx.param("userId"));
+}
+
+export function handleProductsCollectionPageRoute(ctx: RouteContext): Response {
+    return handleProductsRoute(ctx.method(), ctx.body(), appState());
+}
+
+export function handleProductItemPageRoute(ctx: RouteContext): Response {
+    return handleProductRoute(ctx.method(), ctx.body(), appState(), ctx.param("productId"));
+}
+
+export function handleOrdersCollectionPageRoute(ctx: RouteContext): Response {
+    return handleOrdersRoute(ctx.method(), ctx.body(), appState());
+}
+
+export function handleOrderItemPageRoute(ctx: RouteContext): Response {
+    return handleOrderRoute(ctx.method(), ctx.body(), appState(), ctx.param("orderId"));
+}
+
+export function handleEventsCollectionPageRoute(ctx: RouteContext): Response {
+    return handleEventsRoute(ctx.method(), appState());
+}
+
+export function handleSearchRoute(ctx: RouteContext): Response {
+    let body: JsonObject = objectOf({});
+    body.setString("error", "Search not implemented in this version");
+    let query: string = ctx.query("q");
+    if (query != "") {
+        body.setString("query", query);
+    }
+    return createJsonResponse(body, 501);
+}

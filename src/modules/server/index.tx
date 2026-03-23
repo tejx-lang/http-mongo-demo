@@ -2,6 +2,7 @@
 import std:net;
 import std:binary;
 import { stringify } from "std:json";
+import { nowMs } from "std:time";
 import { Map } from "std:collections";
 import { describeError } from "../errors/index.tx";
 import { JsonObject, objectOf } from "../json/index.tx";
@@ -398,4 +399,504 @@ export function createEmptyResponse(status: int): Response {
     r.status = status;
     r.body = "";
     return r;
+}
+
+function normalizeRoutePath(path: string): string {
+    let raw: string = stableCopy(path).trim();
+    if (raw == "" || raw == "/") {
+        return "/";
+    }
+
+    let parts: string[] = raw.split("/");
+    let normalizedParts: string[] = [];
+    for (let i: int = 0; i < parts.length(); i++) {
+        let part: string = parts[i].trim();
+        if (part == "") {
+            continue;
+        }
+        normalizedParts.push(part);
+    }
+
+    if (normalizedParts.length() == 0) {
+        return "/";
+    }
+
+    return "/" + normalizedParts.join("/");
+}
+
+function joinRoutePath(prefix: string, path: string): string {
+    let normalizedPrefix: string = normalizeRoutePath(prefix);
+    let normalizedPath: string = normalizeRoutePath(path);
+
+    if (normalizedPrefix == "/") {
+        return normalizedPath;
+    }
+
+    if (normalizedPath == "/") {
+        return normalizedPrefix;
+    }
+
+    return normalizedPrefix + normalizedPath;
+}
+
+function splitRoutePath(path: string): string[] {
+    let normalized: string = normalizeRoutePath(path);
+    if (normalized == "/") {
+        return [];
+    }
+    return normalized.substring(1, normalized.length()).split("/");
+}
+
+function normalizedRouteMethod(method: string): string {
+    return stableText(method).toUpperCase();
+}
+
+function isParamSegment(segment: string): bool {
+    return segment.startsWith(":") && segment.length() > 1;
+}
+
+function paramName(segment: string): string {
+    if (!isParamSegment(segment)) {
+        return "";
+    }
+    return segment.substring(1, segment.length());
+}
+
+function copyRouteParams(source: Map<string, string>): Map<string, string> {
+    let out: Map<string, string> = new Map<string, string>();
+    let keys: string[] = source.keys();
+    for (let i: int = 0; i < keys.length(); i++) {
+        let key: string = keys[i];
+        let value: Optional<string> = source.get(key);
+        if (value != None) {
+            out.set(key, value as string);
+        }
+    }
+    return out;
+}
+
+export class RouteDefinition {
+    name: string;
+    method: string;
+    path: string;
+
+    constructor(name: string, method: string, path: string) {
+        this.name = name;
+        this.method = normalizedRouteMethod(method);
+        this.path = normalizeRoutePath(path);
+    }
+
+    signature(): string {
+        return this.method + " " + this.path;
+    }
+}
+
+export class RouteMatch {
+    route: RouteDefinition;
+    params: Map<string, string>;
+
+    constructor(route: RouteDefinition, params: Map<string, string>) {
+        this.route = route;
+        this.params = copyRouteParams(params);
+    }
+
+    param(name: string): string {
+        let value: Optional<string> = this.params.get(name);
+        if (value == None) {
+            return "";
+        }
+        return value as string;
+    }
+}
+
+export class RouteLookup {
+    routeName: string;
+    match: Optional<RouteMatch>;
+    allowedMethods: string[];
+
+    constructor(routeName: string, match: Optional<RouteMatch>, allowedMethods: string[]) {
+        this.routeName = routeName;
+        this.match = match;
+        this.allowedMethods = [];
+        for (let i: int = 0; i < allowedMethods.length(); i++) {
+            this.allowedMethods.push(allowedMethods[i]);
+        }
+    }
+}
+
+class NodeMatch {
+    node: RouteNode;
+    params: Map<string, string>;
+
+    constructor(node: RouteNode, params: Map<string, string>) {
+        this.node = node;
+        this.params = copyRouteParams(params);
+    }
+}
+
+class RouteNode {
+    segment: string;
+    paramKey: string;
+    literalChildren: Map<string, RouteNode>;
+    paramChild: Optional<RouteNode>;
+    endpoints: Map<string, RouteDefinition>;
+
+    constructor(segment: string, paramKey: string) {
+        this.segment = segment;
+        this.paramKey = paramKey;
+        this.literalChildren = new Map<string, RouteNode>();
+        this.paramChild = None;
+        this.endpoints = new Map<string, RouteDefinition>();
+    }
+
+    ensureChild(segment: string): RouteNode {
+        if (isParamSegment(segment)) {
+            if (this.paramChild == None) {
+                this.paramChild = new RouteNode(segment, paramName(segment));
+            }
+            return this.paramChild as RouteNode;
+        }
+
+        let existing: Optional<RouteNode> = this.literalChildren.get(segment);
+        if (existing != None) {
+            return existing as RouteNode;
+        }
+
+        let child: RouteNode = new RouteNode(segment, "");
+        this.literalChildren.set(segment, child);
+        return child;
+    }
+
+    literalChild(segment: string): Optional<RouteNode> {
+        return this.literalChildren.get(segment);
+    }
+
+    addEndpoint(route: RouteDefinition): void {
+        let existing: Optional<RouteDefinition> = this.endpoints.get(route.method);
+        if (existing != None) {
+            throw new Error("Duplicate route registered for " + route.signature());
+        }
+        this.endpoints.set(route.method, route);
+    }
+
+    endpoint(method: string): Optional<RouteDefinition> {
+        return this.endpoints.get(normalizedRouteMethod(method));
+    }
+
+    allowedMethods(): string[] {
+        let methods: string[] = [];
+        let keys: string[] = this.endpoints.keys();
+        for (let i: int = 0; i < keys.length(); i++) {
+            methods.push(keys[i]);
+        }
+        return methods;
+    }
+
+    primaryRouteName(): string {
+        let methods: string[] = this.endpoints.keys();
+        if (methods.length() == 0) {
+            return "not_found";
+        }
+
+        let routeValue: Optional<RouteDefinition> = this.endpoints.get(methods[0]);
+        if (routeValue == None) {
+            return "not_found";
+        }
+
+        return (routeValue as RouteDefinition).name;
+    }
+}
+
+export class RouteGroup {
+    private router: Router;
+    private prefix: string;
+
+    constructor(router: Router, prefix: string) {
+        this.router = router;
+        this.prefix = normalizeRoutePath(prefix);
+    }
+
+    group(prefix: string): RouteGroup {
+        return new RouteGroup(this.router, joinRoutePath(this.prefix, prefix));
+    }
+
+    route(name: string, method: string, path: string): RouteGroup {
+        this.router.addRoute(new RouteDefinition(
+            name,
+            method,
+            joinRoutePath(this.prefix, path)
+        ));
+        return this;
+    }
+
+    get(name: string, path: string): RouteGroup {
+        return this.route(name, "GET", path);
+    }
+
+    post(name: string, path: string): RouteGroup {
+        return this.route(name, "POST", path);
+    }
+
+    put(name: string, path: string): RouteGroup {
+        return this.route(name, "PUT", path);
+    }
+
+    patch(name: string, path: string): RouteGroup {
+        return this.route(name, "PATCH", path);
+    }
+
+    deleteRoute(name: string, path: string): RouteGroup {
+        return this.route(name, "DELETE", path);
+    }
+}
+
+export class Router {
+    private root: RouteNode;
+
+    constructor() {
+        this.root = new RouteNode("/", "");
+    }
+
+    group(prefix: string): RouteGroup {
+        return new RouteGroup(this, prefix);
+    }
+
+    addRoute(route: RouteDefinition): void {
+        let segments: string[] = splitRoutePath(route.path);
+        let node: RouteNode = this.root;
+
+        for (let i: int = 0; i < segments.length(); i++) {
+            node = node.ensureChild(segments[i]);
+        }
+
+        node.addEndpoint(route);
+    }
+
+    private matchNode(current: RouteNode, segments: string[], index: int, params: Map<string, string>): Optional<NodeMatch> {
+        if (index >= segments.length()) {
+            return new NodeMatch(current, params);
+        }
+
+        let segment: string = segments[index];
+        let literalValue: Optional<RouteNode> = current.literalChild(segment);
+        if (literalValue != None) {
+            let literalMatch: Optional<NodeMatch> = this.matchNode(
+                literalValue as RouteNode,
+                segments,
+                index + 1,
+                params
+            );
+            if (literalMatch != None) {
+                return literalMatch;
+            }
+        }
+
+        if (current.paramChild != None) {
+            let paramNode: RouteNode = current.paramChild as RouteNode;
+            let nextParams: Map<string, string> = copyRouteParams(params);
+            if (paramNode.paramKey != "") {
+                nextParams.set(paramNode.paramKey, segment);
+            }
+            return this.matchNode(paramNode, segments, index + 1, nextParams);
+        }
+
+        return None;
+    }
+
+    lookup(method: string, path: string): RouteLookup {
+        let nodeMatchValue: Optional<NodeMatch> = this.matchNode(
+            this.root,
+            splitRoutePath(path),
+            0,
+            new Map<string, string>()
+        );
+
+        if (nodeMatchValue == None) {
+            return new RouteLookup("not_found", None, []);
+        }
+
+        let nodeMatch: NodeMatch = nodeMatchValue as NodeMatch;
+        let routeValue: Optional<RouteDefinition> = nodeMatch.node.endpoint(method);
+        if (routeValue != None) {
+            let route: RouteDefinition = routeValue as RouteDefinition;
+            return new RouteLookup(route.name, new RouteMatch(route, nodeMatch.params), []);
+        }
+
+        return new RouteLookup(
+            nodeMatch.node.primaryRouteName(),
+            None,
+            nodeMatch.node.allowedMethods()
+        );
+    }
+}
+
+export function createMethodNotAllowedResponse(methods: string[]): Response {
+    let body: JsonObject = objectOf({});
+    body.setString("error", "Method not allowed");
+    body.setStringArray("allowed", methods);
+    return createJsonResponse(body, 405);
+}
+
+export class RouteContext {
+    request: Request;
+    match: RouteMatch;
+
+    constructor(request: Request, match: RouteMatch) {
+        this.request = request;
+        this.match = match;
+    }
+
+    method(): string {
+        return stableMethod(this.request);
+    }
+
+    path(): string {
+        return stablePath(this.request);
+    }
+
+    body(): string {
+        return stableBody(this.request);
+    }
+
+    header(name: string): string {
+        return this.request.header(name);
+    }
+
+    query(name: string): string {
+        return this.request.queryParam(name);
+    }
+
+    param(name: string): string {
+        return this.match.param(name);
+    }
+}
+
+export class RouteHandler {
+    handler: (ctx: RouteContext) => Response;
+
+    constructor(handler: (ctx: RouteContext) => Response) {
+        this.handler = handler;
+    }
+
+    handle(ctx: RouteContext): Response {
+        return this.handler(ctx);
+    }
+}
+
+function routeErrorResponse(message: string, status: int): Response {
+    let body: JsonObject = objectOf({});
+    body.setString("error", message);
+    return createJsonResponse(body, status);
+}
+
+export class RouteResolution {
+    routeName: string;
+    handler: Optional<RouteHandler>;
+    context: Optional<RouteContext>;
+    response: Optional<Response>;
+
+    constructor(
+        routeName: string,
+        handler: Optional<RouteHandler>,
+        context: Optional<RouteContext>,
+        response: Optional<Response>
+    ) {
+        this.routeName = routeName;
+        this.handler = handler;
+        this.context = context;
+        this.response = response;
+    }
+}
+
+export function logRoute(req: Request, routeName: string, response: Response, startedAt: int64): void {
+    let durationMs: int64 = nowMs() - startedAt;
+    print(
+        colorLabel("route", "34"),
+        colorMethod(stableMethod(req)),
+        colorPath(stablePath(req)),
+        dimText("->"),
+        colorRoute(routeName),
+        colorStatus(response.status),
+        dimText("+" + String(durationMs) + "ms")
+    );
+}
+
+export class HandlerRouter {
+    private tree: Router;
+    private handlers: Map<string, RouteHandler>;
+
+    constructor() {
+        this.tree = new Router();
+        this.handlers = new Map<string, RouteHandler>();
+    }
+
+    private register(method: string, path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+        let route: RouteDefinition = new RouteDefinition(normalizeRoutePath(path), method, path);
+        this.tree.addRoute(route);
+        this.handlers.set(route.signature(), new RouteHandler(handler));
+        return this;
+    }
+
+    group(prefix: string): RouteGroup {
+        return this.tree.group(prefix);
+    }
+
+    get(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+        return this.register("GET", path, handler);
+    }
+
+    post(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+        return this.register("POST", path, handler);
+    }
+
+    put(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+        return this.register("PUT", path, handler);
+    }
+
+    patch(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+        return this.register("PATCH", path, handler);
+    }
+
+    deleteRoute(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+        return this.register("DELETE", path, handler);
+    }
+
+    resolve(req: Request): RouteResolution {
+        let lookup: RouteLookup = this.tree.lookup(stableMethod(req), stablePath(req));
+        if (lookup.match == None) {
+            if (lookup.allowedMethods.length() > 0) {
+                return new RouteResolution(
+                    lookup.routeName,
+                    None,
+                    None,
+                    createMethodNotAllowedResponse(lookup.allowedMethods)
+                );
+            }
+
+            return new RouteResolution(
+                "not_found",
+                None,
+                None,
+                routeErrorResponse("Route not found", 404)
+            );
+        }
+
+        let match: RouteMatch = lookup.match as RouteMatch;
+        let handlerValue: Optional<RouteHandler> = this.handlers.get(match.route.signature());
+        if (handlerValue == None) {
+            return new RouteResolution(
+                match.route.name,
+                None,
+                None,
+                routeErrorResponse("Route handler not found", 500)
+            );
+        }
+
+        return new RouteResolution(
+            match.route.name,
+            handlerValue,
+            new RouteContext(req, match),
+            None
+        );
+    }
 }

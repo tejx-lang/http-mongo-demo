@@ -1,0 +1,40 @@
+// Shared app runtime state. Bootstrap initializes this once so request handlers can read the database and storage info directly.
+import { MongoDatabase } from "../../modules/mongo/index.tx";
+import { AppState } from "../core/state.tx";
+
+class AppRuntimeState {
+    database: MongoDatabase;
+    storageName: string;
+    state: AppState;
+
+    constructor(database: MongoDatabase, storageName: string, state: AppState) {
+        this.database = database;
+        this.storageName = storageName;
+        this.state = state;
+    }
+}
+
+let runtimeState: Optional<AppRuntimeState> = None;
+
+export function initializeAppRuntime(database: MongoDatabase, storageName: string, state: AppState): void {
+    runtimeState = new AppRuntimeState(database, storageName, state);
+}
+
+function requireRuntimeState(): AppRuntimeState {
+    if (runtimeState == None) {
+        throw new Error("Application runtime was not initialized");
+    }
+    return runtimeState as AppRuntimeState;
+}
+
+export function appDatabase(): MongoDatabase {
+    return requireRuntimeState().database;
+}
+
+export function appStorageName(): string {
+    return requireRuntimeState().storageName;
+}
+
+export function appState(): AppState {
+    return requireRuntimeState().state;
+}

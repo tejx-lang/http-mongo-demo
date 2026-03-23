@@ -1,330 +1,50 @@
-// Central route registry. This file matches paths and hands requests to feature modules.
-import { nowMs } from "std:time";
-import { JsonObject, objectOf } from "../../modules/json/index.tx";
-import { Request, Response, colorLabel, colorMethod, colorPath, colorRoute, colorStatus, createJsonResponse, dimText, stableBody, stableMethod, stablePath } from "../../modules/server/index.tx";
-import { MongoDatabase } from "../../modules/mongo/index.tx";
-import { jsonError } from "../core/responses.tx";
-import { AppState } from "../core/state.tx";
-import { loadAppState } from "../core/store.tx";
-import { handleAuthRoute } from "../features/auth/index.tx";
-import { handleEventsRoute } from "../features/events/routes.tx";
-import { handleExternalRoute } from "../features/external/index.tx";
-import { handleOrderRoute, handleOrdersRoute } from "../features/orders/routes.tx";
-import { handleProductRoute, handleProductsRoute } from "../features/products/routes.tx";
-import { handleReportsSummaryRoute } from "../features/reports/index.tx";
-import { handleUserRoute, handleUsersRoute } from "../features/users/routes.tx";
+// Route declarations only. Keep this file focused on the public URL map.
+import { HandlerRouter } from "../../modules/server/index.tx";
+import {
+    handleAuthLoginRoute,
+    handleEventsCollectionPageRoute,
+    handleExternalPageRoute,
+    handleHealthRoute,
+    handleOrderItemPageRoute,
+    handleOrdersCollectionPageRoute,
+    handleProductItemPageRoute,
+    handleProductsCollectionPageRoute,
+    handleReportsSummaryPageRoute,
+    handleSearchRoute,
+    handleUserItemPageRoute,
+    handleUsersCollectionPageRoute,
+    handleWelcomeRoute
+} from "./handlers.tx";
 
-class RequestContext {
-    method: string;
-    path: string;
-    body: string;
-    storageName: string;
-    database: MongoDatabase;
-
-    constructor(method: string, path: string, body: string, storageName: string, database: MongoDatabase) {
-        this.method = method;
-        this.path = path;
-        this.body = body;
-        this.storageName = storageName;
-        this.database = database;
-    }
-}
-
-class RouteDefinition {
-    name: string;
-    kind: string;
-    path: string;
-    methods: string[];
-
-    constructor(name: string, kind: string, path: string, methods: string[]) {
-        this.name = name;
-        this.kind = kind;
-        this.path = path;
-        this.methods = [];
-        for (let i: int = 0; i < methods.length(); i++) {
-            this.methods.push(methods[i]);
-        }
-    }
-}
-
-class RouteMatch {
-    route: RouteDefinition;
-    resourceId: string;
-
-    constructor(route: RouteDefinition, resourceId: string) {
-        this.route = route;
-        this.resourceId = resourceId;
-    }
-}
-
-class DispatchResult {
-    routeName: string;
-    response: Response;
-
-    constructor(routeName: string, response: Response) {
-        this.routeName = routeName;
-        this.response = response;
-    }
-}
-
-function exactRoute(name: string, path: string, methods: string[]): RouteDefinition {
-    return new RouteDefinition(name, "exact", path, methods);
-}
-
-function collectionRoute(name: string, path: string, methods: string[]): RouteDefinition {
-    return exactRoute(name, path, methods);
-}
-
-function resourceRoute(name: string, prefix: string, methods: string[]): RouteDefinition {
-    return new RouteDefinition(name, "resource", prefix, methods);
-}
-
-function prefixRoute(name: string, prefix: string, methods: string[]): RouteDefinition {
-    return new RouteDefinition(name, "prefix", prefix, methods);
-}
-
-function publicRoutes(): RouteDefinition[] {
-    return [
-        exactRoute("home", "/", ["GET"]),
-        exactRoute("external", "/api/external", ["GET"])
-    ];
-}
-
-// Routes in this group need a freshly loaded AppState because they read or mutate Mongo-backed data.
-function stateRoutes(): RouteDefinition[] {
-    return [
-        exactRoute("health", "/health", ["GET"]),
-        exactRoute("summary", "/api/reports/summary", ["GET"]),
-        exactRoute("auth_login", "/api/auth/login", ["POST"]),
-        collectionRoute("users_collection", "/api/users", ["GET", "POST"]),
-        resourceRoute("user_item", "/api/users/", ["GET", "PUT", "DELETE"]),
-        collectionRoute("products_collection", "/api/products", ["GET", "POST"]),
-        resourceRoute("product_item", "/api/products/", ["GET", "PUT", "DELETE"]),
-        collectionRoute("orders_collection", "/api/orders", ["GET", "POST"]),
-        resourceRoute("order_item", "/api/orders/", ["GET", "PUT", "DELETE"]),
-        exactRoute("events", "/api/events", ["GET"]),
-        prefixRoute("search", "/api/search", ["GET"])
-    ];
-}
-
-function matchesExactPath(path: string, target: string): bool {
-    if (target == "/") {
-        return path == "/" || path == "";
-    }
-
-    return path == target || path == target + "/";
-}
-
-function matchesResourcePath(path: string, prefix: string): Optional<string> {
-    if (!path.startsWith(prefix)) {
-        return None;
-    }
-
-    let resourceId: string = path.substring(prefix.length(), path.length());
-    if (resourceId == "" || resourceId.indexOf("/") >= 0) {
-        return None;
-    }
-
-    return resourceId;
-}
-
-function matchRoute(route: RouteDefinition, path: string): Optional<RouteMatch> {
-    if (route.kind == "exact") {
-        if (matchesExactPath(path, route.path)) {
-            return new RouteMatch(route, "");
-        }
-        return None;
-    }
-
-    if (route.kind == "resource") {
-        let resourceId: Optional<string> = matchesResourcePath(path, route.path);
-        if (resourceId != None) {
-            return new RouteMatch(route, resourceId as string);
-        }
-        return None;
-    }
-
-    if (route.kind == "prefix" && path.startsWith(route.path)) {
-        return new RouteMatch(route, "");
-    }
-
-    return None;
-}
-
-function findRouteMatch(routes: RouteDefinition[], path: string): Optional<RouteMatch> {
-    for (let i: int = 0; i < routes.length(); i++) {
-        let matchValue: Optional<RouteMatch> = matchRoute(routes[i], path);
-        if (matchValue != None) {
-            return matchValue as RouteMatch;
-        }
-    }
-
-    return None;
-}
-
-function methodAllowed(route: RouteDefinition, method: string): bool {
-    for (let i: int = 0; i < route.methods.length(); i++) {
-        if (route.methods[i] == method) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-function methodNotAllowed(route: RouteDefinition): Response {
-    let body: JsonObject = objectOf({});
-    body.setString("error", "Method not allowed");
-    body.setStringArray("allowed", route.methods);
-    return createJsonResponse(body, 405);
-}
-
-function welcomeResponse(): Response {
-    let body: JsonObject = objectOf({});
-    body.setString("message", "Welcome to TejX REST API");
-    body.setString("version", "1.0.0");
-    body.setStringArray("endpoints", [
-        "/health",
-        "/api/auth/login",
-        "/api/users",
-        "/api/products",
-        "/api/orders",
-        "/api/reports/summary",
-        "/api/events",
-        "/api/external"
-    ]);
-    return createJsonResponse(body, 200);
-}
-
-// Public routes can be served without loading the application state from Mongo.
-function runPublicRoute(match: RouteMatch, ctx: RequestContext): Response {
-    if (match.route.name == "home") {
-        return welcomeResponse();
-    }
-
-    if (match.route.name == "external") {
-        return handleExternalRoute(ctx.method);
-    }
-
-    return jsonError("Route not found", 404);
-}
-
-// Stateful routes receive the current in-memory snapshot assembled from Mongo collections.
-function runStateRoute(match: RouteMatch, ctx: RequestContext, state: AppState): Response {
-    if (match.route.name == "health" || match.route.name == "summary") {
-        return handleReportsSummaryRoute(ctx.method, ctx.storageName, state);
-    }
-
-    if (match.route.name == "auth_login") {
-        return handleAuthRoute(ctx.method, ctx.body, state);
-    }
-
-    if (match.route.name == "users_collection") {
-        return handleUsersRoute(ctx.method, ctx.body, state);
-    }
-
-    if (match.route.name == "user_item") {
-        return handleUserRoute(ctx.method, ctx.body, state, match.resourceId);
-    }
-
-    if (match.route.name == "products_collection") {
-        return handleProductsRoute(ctx.method, ctx.body, state);
-    }
-
-    if (match.route.name == "product_item") {
-        return handleProductRoute(ctx.method, ctx.body, state, match.resourceId);
-    }
-
-    if (match.route.name == "orders_collection") {
-        return handleOrdersRoute(ctx.method, ctx.body, state);
-    }
-
-    if (match.route.name == "order_item") {
-        return handleOrderRoute(ctx.method, ctx.body, state, match.resourceId);
-    }
-
-    if (match.route.name == "events") {
-        return handleEventsRoute(ctx.method, state);
-    }
-
-    if (match.route.name == "search") {
-        return jsonError("Search not implemented in this version", 501);
-    }
-
-    return jsonError("Route not found", 404);
-}
-
-function dispatchPublicRoutes(ctx: RequestContext): Optional<DispatchResult> {
-    let matchValue: Optional<RouteMatch> = findRouteMatch(publicRoutes(), ctx.path);
-    if (matchValue == None) {
-        return None;
-    }
-
-    let match: RouteMatch = matchValue as RouteMatch;
-    if (!methodAllowed(match.route, ctx.method)) {
-        return new DispatchResult(match.route.name, methodNotAllowed(match.route));
-    }
-
-    return new DispatchResult(match.route.name, runPublicRoute(match, ctx));
-}
-
-function dispatchStateRoutes(ctx: RequestContext): Optional<DispatchResult> {
-    let matchValue: Optional<RouteMatch> = findRouteMatch(stateRoutes(), ctx.path);
-    if (matchValue == None) {
-        return None;
-    }
-
-    let match: RouteMatch = matchValue as RouteMatch;
-    if (!methodAllowed(match.route, ctx.method)) {
-        return new DispatchResult(match.route.name, methodNotAllowed(match.route));
-    }
-
-    // Delay the load until after routing so public endpoints avoid unnecessary database work.
-    let state: AppState = loadAppState(ctx.database);
-    return new DispatchResult(match.route.name, runStateRoute(match, ctx, state));
-}
-
-export function dispatchRequest(ctx: RequestContext): DispatchResult {
-    let publicResponse: Optional<DispatchResult> = dispatchPublicRoutes(ctx);
-    if (publicResponse != None) {
-        return publicResponse as DispatchResult;
-    }
-
-    let stateResponse: Optional<DispatchResult> = dispatchStateRoutes(ctx);
-    if (stateResponse != None) {
-        return stateResponse as DispatchResult;
-    }
-
-    return new DispatchResult("not_found", jsonError("Route not found", 404));
-}
-
-function logRouteResult(ctx: RequestContext, result: DispatchResult, startedAt: int64): void {
-    let durationMs: int64 = nowMs() - startedAt;
-    print(
-        colorLabel("route", "34"),
-        colorMethod(ctx.method),
-        colorPath(ctx.path),
-        dimText("->"),
-        colorRoute(result.routeName),
-        colorStatus(result.response.status),
-        dimText("+" + String(durationMs) + "ms")
-    );
-}
-
-export function handleRequest(req: Request, storageName: string, database: MongoDatabase): Response {
-    let startedAt: int64 = nowMs();
-    let ctx: RequestContext = new RequestContext(
-        stableMethod(req),
-        stablePath(req),
-        stableBody(req),
-        storageName,
-        database
-    );
-    let result: DispatchResult = dispatchRequest(ctx);
-    logRouteResult(ctx, result, startedAt);
-    return result.response;
-}
-
-export function createAppHandler(storageName: string, database: MongoDatabase): (req: Request) => Response {
-    return (req: Request) => handleRequest(req, storageName, database);
+export function createAppRouter(): HandlerRouter {
+    let router: HandlerRouter = new HandlerRouter();
+    
+    router.get("/", handleWelcomeRoute);
+    router.get("/health", handleHealthRoute);
+    router.get("/api/external", handleExternalPageRoute);
+    router.get("/api/reports/summary", handleReportsSummaryPageRoute);
+    router.post("/api/auth/login", handleAuthLoginRoute);
+    
+    router.get("/api/users", handleUsersCollectionPageRoute);
+    router.post("/api/users", handleUsersCollectionPageRoute);
+    router.get("/api/users/:userId", handleUserItemPageRoute);
+    router.put("/api/users/:userId", handleUserItemPageRoute);
+    router.deleteRoute("/api/users/:userId", handleUserItemPageRoute);
+    
+    router.get("/api/products", handleProductsCollectionPageRoute);
+    router.post("/api/products", handleProductsCollectionPageRoute);
+    router.get("/api/products/:productId", handleProductItemPageRoute);
+    router.put("/api/products/:productId", handleProductItemPageRoute);
+    router.deleteRoute("/api/products/:productId", handleProductItemPageRoute);
+    
+    router.get("/api/orders", handleOrdersCollectionPageRoute);
+    router.post("/api/orders", handleOrdersCollectionPageRoute);
+    router.get("/api/orders/:orderId", handleOrderItemPageRoute);
+    router.put("/api/orders/:orderId", handleOrderItemPageRoute);
+    router.deleteRoute("/api/orders/:orderId", handleOrderItemPageRoute);
+    
+    router.get("/api/events", handleEventsCollectionPageRoute);
+    router.get("/api/search", handleSearchRoute);
+    
+    return router;
 }

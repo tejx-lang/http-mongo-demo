@@ -45,10 +45,5 @@ build_target() {
 }
 
 build_target "server" "$SRC_DIR/main.tx" "$BUILD_DIR/server"
-build_target "example" "$EXAMPLES_DIR/probes/verify_net.tx" "$BUILD_DIR/verify_net"
-build_target "example" "$EXAMPLES_DIR/clients/internal_client.tx" "$BUILD_DIR/internal_client"
-build_target "example" "$EXAMPLES_DIR/probes/https_probe.tx" "$BUILD_DIR/https_probe"
-build_target "example" "$EXAMPLES_DIR/probes/mongo_probe.tx" "$BUILD_DIR/mongo_probe"
-build_target "example" "$EXAMPLES_DIR/probes/json_probe.tx" "$BUILD_DIR/json_probe"
 
 echo "Build complete"
