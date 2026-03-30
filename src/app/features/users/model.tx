@@ -1,6 +1,6 @@
 // User domain types plus persistence and response shapes.
 import { Map } from "std:collections";
-import { JsonObject, objectOf } from "../../../modules/json/index.tx";
+import { JsonObject, objectOf } from "../../helpers/json.tx";
 
 function cloneStrings(values: string[]): string[] {
     let out: string[] = [];

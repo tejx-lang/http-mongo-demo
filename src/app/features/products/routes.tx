@@ -1,12 +1,12 @@
 // Route adapter for the products feature.
-import { Response } from "../../../modules/server/index.tx";
+import { ServerResponse } from "../../../modules/server/index.tx";
 import { AppState } from "../../core/state.tx";
 import { handleProductItem, handleProductsCollection } from "./handler.tx";
 
-export function handleProductsRoute(method: string, body: string, state: AppState): Response {
+export function handleProductsRoute(method: string, body: string, state: AppState): ServerResponse {
     return handleProductsCollection(method, body, state);
 }
 
-export function handleProductRoute(method: string, body: string, state: AppState, productId: string): Response {
+export function handleProductRoute(method: string, body: string, state: AppState, productId: string): ServerResponse {
     return handleProductItem(method, body, state, productId);
 }

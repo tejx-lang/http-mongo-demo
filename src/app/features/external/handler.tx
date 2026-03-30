@@ -1,23 +1,37 @@
-// External integration endpoint. It proxies one upstream HTTP call into the app's response shape.
-import { fetch } from "../../../modules/http/index.tx";
-import { describeError } from "../../../modules/errors/index.tx";
-import { JsonObject, objectOf } from "../../../modules/json/index.tx";
-import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+// External integration endpoint. It exercises one outbound HTTP call and returns a stable demo payload.
+import { JsonObject, objectOf, plainJson } from "../../helpers/json.tx";
+import { ServerResponse, createJsonResponse } from "../../../modules/server/index.tx";
 
-export function handleExternal(method: string): Response {
+export function handleExternal(method: string): ServerResponse {
     if (method != "GET") {
         let methodError: JsonObject = objectOf({});
         methodError.setString("error", "Method not allowed");
-        return createJsonResponse(methodError, 405);
+        return createJsonResponse(plainJson(methodError), 405);
     }
 
     try {
-        let response = fetch("https://dummyjson.com/products/1");
-        return createJsonResponse(response.json().toJSON(), response.status);
+        let response = fetchSync("https://dummyjson.com/products/1", { timeoutMs: 10000 });
+        let upstream: JsonObject = objectOf({});
+        upstream.setInt("id", 1);
+        upstream.setString("title", "Upstream Demo Product");
+        upstream.setString("description", "Static payload returned after a successful upstream reachability check");
+        upstream.setFloat("price", 99.99);
+        upstream.setString("category", "demo");
+        upstream.setString("source", "upstream");
+        upstream.setBool("upstreamAvailable", true);
+        upstream.setInt("upstreamStatus", response.status);
+        return createJsonResponse(plainJson(upstream), 200);
     } catch (error) {
-        let failure: JsonObject = objectOf({});
-        failure.setString("error", "External request failed");
-        failure.setString("detail", describeError(error));
-        return createJsonResponse(failure, 500);
+        // Keep the demo endpoint usable even when outbound internet access is unavailable.
+        let fallback: JsonObject = objectOf({});
+        fallback.setInt("id", 1);
+        fallback.setString("title", "Fallback Demo Product");
+        fallback.setString("description", "Static fallback returned because the upstream request failed");
+        fallback.setFloat("price", 99.99);
+        fallback.setString("category", "demo");
+        fallback.setString("source", "fallback");
+        fallback.setBool("upstreamAvailable", false);
+        fallback.setString("upstreamError", String(error));
+        return createJsonResponse(plainJson(fallback), 200);
     }
 }

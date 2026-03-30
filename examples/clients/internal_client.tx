@@ -1,11 +1,18 @@
-// Simple end-to-end client that exercises the public HTTP API from outside the server process.
+// Simple end-to-end client that exercises the built-in fetch API from outside the server process.
 import { getEnv } from "std:system";
 import { nowMs } from "std:time";
-import { HttpResponse, get, postJson } from "../../src/modules/http/index.tx";
-import { JsonObject, jsonObject } from "../../src/modules/json/index.tx";
+import { JsonObject, parseObject } from "../../src/app/helpers/json.tx";
+
+function envOrEmpty(name: string): string {
+    let value: Optional<string> = getEnv(name);
+    if (value == None) {
+        return "";
+    }
+    return value as string;
+}
 
 function resolveBaseUrl(): string {
-    let baseUrl: string = getEnv("APP_BASE_URL");
+    let baseUrl: string = envOrEmpty("APP_BASE_URL");
     if (baseUrl != "") {
         return baseUrl;
     }
@@ -25,46 +32,61 @@ function main() {
     let password: string = "demo123";
 
     // Create one user, two products, then an order so the full CRUD/auth/report flow is exercised.
-    let health: HttpResponse = get(baseUrl + "/health");
-    let createUser: HttpResponse = postJson(baseUrl + "/api/users", jsonObject({
-        name: "Demo User " + suffix,
-        email: email,
-        password: password,
-        role: "customer"
-    }));
-    let createKeyboard: HttpResponse = postJson(baseUrl + "/api/products", jsonObject({
-        name: "Keyboard " + suffix,
-        price: 99.99,
-        stock: 15,
-        category: "accessories"
-    }));
-    let createMouse: HttpResponse = postJson(baseUrl + "/api/products", jsonObject({
-        name: "Mouse " + suffix,
-        price: 49.5,
-        stock: 22,
-        category: "accessories"
-    }));
+    let health = fetchSync(baseUrl + "/health");
+    let createUser = fetchSync(baseUrl + "/api/users", {
+        method: "POST",
+        body: {
+            name: "Demo User " + suffix,
+            email: email,
+            password: password,
+            role: "customer"
+        }
+    });
+    let createKeyboard = fetchSync(baseUrl + "/api/products", {
+        method: "POST",
+        body: {
+            name: "Keyboard " + suffix,
+            price: 99.99,
+            stock: 15,
+            category: "accessories"
+        }
+    });
+    let createMouse = fetchSync(baseUrl + "/api/products", {
+        method: "POST",
+        body: {
+            name: "Mouse " + suffix,
+            price: 49.5,
+            stock: 22,
+            category: "accessories"
+        }
+    });
 
-    let userData: JsonObject = createUser.json();
-    let keyboardData: JsonObject = createKeyboard.json();
-    let mouseData: JsonObject = createMouse.json();
+    let userData: JsonObject = parseObject(createUser.text());
+    let keyboardData: JsonObject = parseObject(createKeyboard.text());
+    let mouseData: JsonObject = parseObject(createMouse.text());
 
-    let login: HttpResponse = postJson(baseUrl + "/api/auth/login", jsonObject({
-        email: email,
-        password: password
-    }));
-    let order: HttpResponse = postJson(baseUrl + "/api/orders", jsonObject({
-        userId: userData.string("id"),
-        productIds: [keyboardData.string("id"), mouseData.string("id")]
-    }));
-    let summary: HttpResponse = get(baseUrl + "/api/reports/summary");
+    let login = fetchSync(baseUrl + "/api/auth/login", {
+        method: "POST",
+        body: {
+            email: email,
+            password: password
+        }
+    });
+    let order = fetchSync(baseUrl + "/api/orders", {
+        method: "POST",
+        body: {
+            userId: userData.string("id"),
+            productIds: [keyboardData.string("id"), mouseData.string("id")]
+        }
+    });
+    let summary = fetchSync(baseUrl + "/api/reports/summary");
 
     print("Internal API client using ", baseUrl);
-    printResponse("GET /health", health.status, health.body);
-    printResponse("POST /api/users", createUser.status, createUser.body);
-    printResponse("POST /api/products (keyboard)", createKeyboard.status, createKeyboard.body);
-    printResponse("POST /api/products (mouse)", createMouse.status, createMouse.body);
-    printResponse("POST /api/auth/login", login.status, login.body);
-    printResponse("POST /api/orders", order.status, order.body);
-    printResponse("GET /api/reports/summary", summary.status, summary.body);
+    printResponse("GET /health", health.status, health.text());
+    printResponse("POST /api/users", createUser.status, createUser.text());
+    printResponse("POST /api/products (keyboard)", createKeyboard.status, createKeyboard.text());
+    printResponse("POST /api/products (mouse)", createMouse.status, createMouse.text());
+    printResponse("POST /api/auth/login", login.status, login.text());
+    printResponse("POST /api/orders", order.status, order.text());
+    printResponse("GET /api/reports/summary", summary.status, summary.text());
 }

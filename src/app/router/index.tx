@@ -21,8 +21,10 @@ export function createAppRouter(): HandlerRouter {
     
     router.get("/", handleWelcomeRoute);
     router.get("/health", handleHealthRoute);
-    router.get("/api/external", handleExternalPageRoute);
+
     router.get("/api/reports/summary", handleReportsSummaryPageRoute);
+    router.get("/api/external", handleExternalPageRoute);
+    router.get("/api/search", handleSearchRoute);
     router.post("/api/auth/login", handleAuthLoginRoute);
     
     router.get("/api/users", handleUsersCollectionPageRoute);
@@ -44,7 +46,6 @@ export function createAppRouter(): HandlerRouter {
     router.deleteRoute("/api/orders/:orderId", handleOrderItemPageRoute);
     
     router.get("/api/events", handleEventsCollectionPageRoute);
-    router.get("/api/search", handleSearchRoute);
     
     return router;
 }

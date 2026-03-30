@@ -20,5 +20,8 @@ export function toProductsView(products: ProductCollection): ProductCollectionVi
 }
 
 export function lowStockProductsView(products: ProductCollection, threshold: int = 10): ProductCollectionView {
+    if (threshold <= 0) {
+        threshold = 10;
+    }
     return lowStockProductsToDocument(products, threshold);
 }

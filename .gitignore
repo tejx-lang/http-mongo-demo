@@ -1,2 +1,4 @@
 build
 tmp
+data
+build_output.log

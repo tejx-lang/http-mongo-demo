@@ -1,12 +1,12 @@
 // Route adapter for the orders feature.
-import { Response } from "../../../modules/server/index.tx";
+import { ServerResponse } from "../../../modules/server/index.tx";
 import { AppState } from "../../core/state.tx";
 import { handleOrderItem, handleOrdersCollection } from "./handler.tx";
 
-export function handleOrdersRoute(method: string, body: string, state: AppState): Response {
+export function handleOrdersRoute(method: string, body: string, state: AppState): ServerResponse {
     return handleOrdersCollection(method, body, state);
 }
 
-export function handleOrderRoute(method: string, body: string, state: AppState, orderId: string): Response {
+export function handleOrderRoute(method: string, body: string, state: AppState, orderId: string): ServerResponse {
     return handleOrderItem(method, body, state, orderId);
 }

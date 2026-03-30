@@ -1,12 +1,12 @@
 // Mongo persistence for events.
-import { cloneWithoutMongoFields, insertDocument } from "../../core/persistence.tx";
+import { cloneWithoutMongoFields, insertDocument, toMongoDocument, wrapMongoDocuments } from "../../core/persistence.tx";
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
-import { JsonObject, objectOf } from "../../../modules/json/index.tx";
+import { JsonObject, objectOf } from "../../helpers/json.tx";
 import { AppEvent, EventCollection, eventFromDocument, eventToDocument } from "./model.tx";
 
 export function loadEvents(client: MongoDatabase): EventCollection {
     let events: EventCollection = new EventCollection();
-    let documents: JsonObject[] = client.find("events", objectOf({}));
+    let documents: JsonObject[] = wrapMongoDocuments(client.find("events", toMongoDocument(objectOf({}))));
 
     // Rebuild the keyed in-memory collection from the stored Mongo documents.
     for (let i: int = 0; i < documents.length(); i++) {

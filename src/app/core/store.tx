@@ -4,30 +4,31 @@ import { nextEntityId } from "./ids.tx";
 import { AppState } from "./state.tx";
 import { MongoDatabase } from "../../modules/mongo/index.tx";
 import { createEventRecord, loadEventCollection, saveEventRecord } from "../features/events/index.tx";
-import { bootstrapMeta, loadMetaState, saveMetaState } from "../features/meta/index.tx";
+
 import { loadOrderCollection } from "../features/orders/index.tx";
 import { loadProductCollection } from "../features/products/index.tx";
 import { loadUserCollection } from "../features/users/index.tx";
 
 export function ensureAppState(client: MongoDatabase): void {
-    bootstrapMeta(client);
 }
 
 export function loadAppState(client: MongoDatabase): AppState {
+    let users = loadUserCollection(client);
+    let products = loadProductCollection(client);
+    let orders = loadOrderCollection(client);
+    let events = loadEventCollection(client);
+
     return new AppState(
         client,
-        loadMetaState(client),
-        loadUserCollection(client),
-        loadProductCollection(client),
-        loadOrderCollection(client),
-        loadEventCollection(client)
+        users,
+        products,
+        orders,
+        events
     );
 }
 
 // Touch shared metadata whenever a write changes the visible state of the app.
 export function touchAppState(state: AppState): void {
-    state.meta.updatedAt = nowMs();
-    saveMetaState(state.client, state.meta);
 }
 
 // Record audit-style events beside business data so reports can explain recent mutations.

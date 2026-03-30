@@ -1,12 +1,12 @@
 // Application bootstrap: resolve configuration, connect Mongo, and start the HTTP server.
 import std:binary;
+import { exit } from "std:system";
 import { nowMs } from "std:time";
 import { resolvePort, resolveBaseUrl, resolveMongoConnection } from "./config/env.tx";
 import { ensureAppState, loadAppState } from "./core/store.tx";
 import { AppState } from "./core/state.tx";
 import { setAppRuntime } from "./runtime/index.tx";
 import { MongoConnection, MongoDatabase, openMongo } from "../modules/mongo/index.tx";
-import { describeError } from "../modules/errors/index.tx";
 import { serve, colorLabel, colorText, dimText } from "../modules/server/index.tx";
 import { handleAppRequest, initializeAppRouter } from "./router/runtime.tx";
 
@@ -112,6 +112,9 @@ function createApplicationDatabase(connection: MongoConnection, progress: Startu
     progress.log("MongoDB connection established, ensuring app state");
     ensureAppState(database);
     progress.log("App state ready");
+    progress.log("Authenticating MongoDB session");
+    database.ping();
+    progress.log("MongoDB session authenticated");
     return database;
 }
 
@@ -162,7 +165,7 @@ export function runApplication(): void {
         logStartup(runtime);
         startApplicationServer(runtime, progress);
     } catch (error) {
-        print(colorLabel("fatal", "31"), colorText("starting server failed:", "31"), describeError(error));
+        print(colorLabel("fatal", "31"), colorText("starting server failed:", "31"), String(error));
         exit(1);
     }
 }

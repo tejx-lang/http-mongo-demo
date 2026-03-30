@@ -1,8 +1,8 @@
 // Public auth module entrypoint.
-import { Response } from "../../../modules/server/index.tx";
+import { ServerResponse } from "../../../modules/server/index.tx";
 import { AppState } from "../../core/state.tx";
 import { handleLogin } from "./handler.tx";
 
-export function handleAuthRoute(method: string, body: string, state: AppState): Response {
+export function handleAuthRoute(method: string, body: string, state: AppState): ServerResponse {
     return handleLogin(method, body, state);
 }

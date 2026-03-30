@@ -1,0 +1,8 @@
+// Public search feature entrypoint.
+import { ServerResponse } from "../../../modules/server/index.tx";
+import { AppState } from "../../core/state.tx";
+import { handleSearch } from "./handler.tx";
+
+export function handleSearchFeatureRoute(method: string, queryText: string, state: AppState): ServerResponse {
+    return handleSearch(method, queryText, state);
+}

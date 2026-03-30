@@ -1,6 +1,5 @@
-// Shared JSON wrapper with typed accessors so app code does not index raw objects directly.
-import { jsonBoolean, jsonNumber, jsonString, jsonStringArray } from "./fields.tx";
-import { parseJson } from "./parser.tx";
+// Small typed JSON helper built on top of the language's built-in std:json support.
+import std:json;
 
 function stringValue(value: any, fallback: string = ""): string {
     if (value == None) {
@@ -66,12 +65,38 @@ function floatValue(value: any, fallback: float = 0.0): float {
     return parseFloat(String(value));
 }
 
+function cloneJsonValue(value: any): any {
+    if (value == None) {
+        return None;
+    }
+
+    if (typeof(value) == "array") {
+        let values: any[] = value as any[];
+        let out: any[] = [];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(cloneJsonValue(values[i]));
+        }
+        return out;
+    }
+
+    if (typeof(value) == "object") {
+        let out: any = {};
+        let keys: string[] = Object.keys(value);
+        for (let i: int = 0; i < keys.length(); i++) {
+            let key: string = keys[i];
+            out[key] = cloneJsonValue(value[key]);
+        }
+        return out;
+    }
+
+    return value;
+}
+
 function normalizeObjectValue(value: any): any {
     if (value == None) {
         return {};
     }
 
-    // Accept domain/view objects and unwrap them into plain data before storing them.
     if (typeof(value["toJSON"]) == "function") {
         return value.toJSON();
     }
@@ -178,7 +203,6 @@ export class JsonObject {
         return fallback;
     }
 
-    // Nested objects may already be wrapped, so normalize them before returning another JsonObject.
     object(key: string): Optional<JsonObject> {
         let normalized: any = normalizeObjectValue(this.values[key]);
         if (normalized == None || typeof(normalized) != "object") {
@@ -295,15 +319,23 @@ export class JsonObject {
 }
 
 export function parse(text: string): JsonObject {
-    return new JsonObject(parseJson(text));
+    return new JsonObject(cloneJsonValue(json.parse(text)));
 }
 
 export function parseObject(text: string): JsonObject {
     return parse(text);
 }
 
+export function parseValue(text: string): any {
+    return json.parse(text);
+}
+
 export function objectOf(value: any): JsonObject {
     return new JsonObject(normalizeObjectValue(value));
+}
+
+export function plainJson(value: JsonObject): any {
+    return value.toJSON();
 }
 
 export function jsonObject(value: any = {}): JsonObject {
@@ -314,18 +346,96 @@ export function emptyObject(): JsonObject {
     return objectOf({});
 }
 
+export function hasField(value: any, key: string): bool {
+    if (value == None) {
+        return false;
+    }
+    return value[key] != None;
+}
+
+export function stringField(value: any, key: string): string {
+    if (value == None) {
+        return "";
+    }
+    return stringValue(value[key], "");
+}
+
+export function stringFieldOr(value: any, key: string, fallback: string): string {
+    if (value == None) {
+        return fallback;
+    }
+    return stringValue(value[key], fallback);
+}
+
+export function intFieldOr(value: any, key: string, fallback: int): int {
+    if (value == None) {
+        return fallback;
+    }
+    return intValue(value[key], fallback);
+}
+
+export function floatFieldOr(value: any, key: string, fallback: float): float {
+    if (value == None) {
+        return fallback;
+    }
+    return floatValue(value[key], fallback);
+}
+
+export function stringArrayField(value: any, key: string): string[] {
+    if (value == None) {
+        return [];
+    }
+
+    let raw: any = value[key];
+    if (raw == None || typeof(raw) != "array") {
+        return [];
+    }
+
+    let values: any[] = raw as any[];
+    let out: string[] = [];
+    for (let i: int = 0; i < values.length(); i++) {
+        out.push(stringValue(values[i], ""));
+    }
+    return out;
+}
+
 export function readString(text: string, key: string): Optional<string> {
-    return jsonString(text, key);
+    let value: any = parseValue(text);
+    if (!hasField(value, key)) {
+        return None;
+    }
+    return stringField(value, key);
 }
 
 export function readNumber(text: string, key: string): Optional<float> {
-    return jsonNumber(text, key);
+    let value: any = parseValue(text);
+    if (!hasField(value, key)) {
+        return None;
+    }
+    return floatFieldOr(value, key, 0.0);
 }
 
 export function readBoolean(text: string, key: string): Optional<bool> {
-    return jsonBoolean(text, key);
+    let value: any = parseValue(text);
+    if (!hasField(value, key)) {
+        return None;
+    }
+    let raw: any = value[key];
+    if (typeof(raw) == "bool") {
+        return raw as bool;
+    }
+    if (typeof(raw) == "int" || typeof(raw) == "int32" || typeof(raw) == "int64") {
+        return (raw as int64) != 0;
+    }
+    if (typeof(raw) == "float" || typeof(raw) == "float32" || typeof(raw) == "float64") {
+        return (raw as float) != 0.0;
+    }
+    if (typeof(raw) == "string") {
+        return (raw as string) != "";
+    }
+    return None;
 }
 
 export function readStringArray(text: string, key: string): string[] {
-    return jsonStringArray(text, key);
+    return stringArrayField(parseValue(text), key);
 }

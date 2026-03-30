@@ -4,8 +4,6 @@ import std:binary;
 import { stringify } from "std:json";
 import { nowMs } from "std:time";
 import { Map } from "std:collections";
-import { describeError } from "../errors/index.tx";
-import { JsonObject, objectOf } from "../json/index.tx";
 
 function parseDecimalInt(text: string): int {
     let digits: string = "0123456789";
@@ -98,6 +96,18 @@ export function colorPath(path: string): string {
     return colorText(path, "37");
 }
 
+function jsonValue(data: any): any {
+    if (data == None) {
+        return {};
+    }
+
+    if (typeof(data["toJSON"]) == "function") {
+        return data.toJSON();
+    }
+
+    return data;
+}
+
 function parseHeaderLines(lines: string[], startIndex: int): Map<string, string> {
     let headers = new Map<string, string>();
     let i: int = startIndex;
@@ -169,7 +179,7 @@ export function readRawRequest(stream: TcpStream): string {
     return raw;
 }
 
-export class Request {
+export class ServerRequest {
     method: string;
     rawPath: string;
     path: string;
@@ -219,8 +229,8 @@ export class Request {
         this.headers = parseHeaderLines(lines, 1);
     }
     
-    static snapshot(req: Request): Request {
-        let copy: Request = new Request("");
+    static snapshot(req: ServerRequest): ServerRequest {
+        let copy: ServerRequest = new ServerRequest("");
         copy.method = stableText(req.method).toUpperCase();
         copy.rawPath = stableCopy(req.rawPath);
         copy.path = stableCopy(req.path);
@@ -247,7 +257,7 @@ export class Request {
     }
 }
 
-export class Response {
+export class ServerResponse {
     status: int;
     headers: Map<string, string>;
     body: string;
@@ -291,22 +301,22 @@ export class Response {
     }
 }
 
-export function methodIs(req: Request, expected: string): bool {
+export function methodIs(req: ServerRequest, expected: string): bool {
     let actual: string = stableText(req.method).toUpperCase();
     let target: string = stableText(expected).toUpperCase();
     return actual == target || actual.startsWith(target);
 }
 
-export function stableMethod(req: Request): string {
+export function stableMethod(req: ServerRequest): string {
     return stableText(req.method).toUpperCase();
 }
 
-export function stablePath(req: Request): string {
+export function stablePath(req: ServerRequest): string {
     return stableCopy(req.path);
 }
 
-export function stableBody(req: Request): string {
-    return stableCopy(req.body);
+export function stableBody(req: ServerRequest): string {
+    return req.body;
 }
 
 export class Server {
@@ -317,7 +327,7 @@ export class Server {
     }
     
     // This server handles one request per connection and always closes after sending a response.
-    private handleConnection(stream: TcpStream, handler: (req: Request) => Response): void {
+    private handleConnection(stream: TcpStream, handler: (req: ServerRequest) => ServerResponse): void {
         try {
             let raw: string = readRawRequest(stream);
             if (raw == "") {
@@ -325,23 +335,23 @@ export class Server {
                 return;
             }
             
-            let req: Request = Request.snapshot(new Request(raw));
-            let res: Response = handler(req);
+            let req: ServerRequest = ServerRequest.snapshot(new ServerRequest(raw));
+            let res: ServerResponse = handler(req);
             res.send(stream);
             stream.close();
         } catch (error) {
-            let detail: string = describeError(error);
+            let detail: string = String(error);
             print(colorLabel("server", "31"), dimText("request_error"), colorText(detail, "31"));
-            let errorBody: JsonObject = objectOf({});
-            errorBody.setString("error", "Internal server error");
-            errorBody.setString("detail", detail);
-            let res = createJsonResponse(errorBody, 500);
+            let res = createJsonResponse({
+                error: "Internal server error",
+                detail: detail
+            }, 500);
             res.send(stream);
             stream.close();
         }
     }
     
-    listen(addr: string, handler: (req: Request) => Response): void {
+    listen(addr: string, handler: (req: ServerRequest) => ServerResponse): void {
         let listener = net.listen(addr);
         this.listener = listener;
         
@@ -350,7 +360,7 @@ export class Server {
                 let stream = listener.accept();
                 this.handleConnection(stream, handler);
             } catch (acceptError) {
-                throw new Error("Accept failed on " + addr + ": " + describeError(acceptError));
+                throw new Error("Accept failed on " + addr + ": " + String(acceptError));
             }
         }
     }
@@ -363,7 +373,7 @@ export class Server {
     }
 }
 
-export function serve(addr: string, handler: (req: Request) => Response): void {
+export function serve(addr: string, handler: (req: ServerRequest) => ServerResponse): void {
     let server: Server = new Server();
     server.listen(addr, handler);
 }
@@ -384,23 +394,23 @@ function statusTextForCode(status: int): string {
     return "OK";
 }
 
-export function createJsonResponse(data: JsonObject, status: int): Response {
-    let r = new Response();
+export function createJsonResponse(data: any, status: int): ServerResponse {
+    let r = new ServerResponse();
     r.status = status;
-    r.body = stringify(data.toJSON());
+    r.body = stringify(jsonValue(data));
     return r;
 }
 
-export function createTextResponse(data: string, status: int): Response {
-    let r = new Response();
+export function createTextResponse(data: string, status: int): ServerResponse {
+    let r = new ServerResponse();
     r.status = status;
     r.setHeader("Content-Type", "text/plain; charset=utf-8");
     r.body = data;
     return r;
 }
 
-export function createEmptyResponse(status: int): Response {
-    let r = new Response();
+export function createEmptyResponse(status: int): ServerResponse {
+    let r = new ServerResponse();
     r.status = status;
     r.body = "";
     return r;
@@ -735,18 +745,18 @@ export class Router {
     }
 }
 
-export function createMethodNotAllowedResponse(methods: string[]): Response {
-    let body: JsonObject = objectOf({});
-    body.setString("error", "Method not allowed");
-    body.setStringArray("allowed", methods);
-    return createJsonResponse(body, 405);
+export function createMethodNotAllowedResponse(methods: string[]): ServerResponse {
+    return createJsonResponse({
+        error: "Method not allowed",
+        allowed: methods
+    }, 405);
 }
 
 export class RouteContext {
-    request: Request;
+    request: ServerRequest;
     match: RouteMatch;
 
-    constructor(request: Request, match: RouteMatch) {
+    constructor(request: ServerRequest, match: RouteMatch) {
         this.request = request;
         this.match = match;
     }
@@ -777,34 +787,32 @@ export class RouteContext {
 }
 
 export class RouteHandler {
-    handler: (ctx: RouteContext) => Response;
+    handler: (ctx: RouteContext) => ServerResponse;
 
-    constructor(handler: (ctx: RouteContext) => Response) {
+    constructor(handler: (ctx: RouteContext) => ServerResponse) {
         this.handler = handler;
     }
 
-    handle(ctx: RouteContext): Response {
+    handle(ctx: RouteContext): ServerResponse {
         return this.handler(ctx);
     }
 }
 
-function routeErrorResponse(message: string, status: int): Response {
-    let body: JsonObject = objectOf({});
-    body.setString("error", message);
-    return createJsonResponse(body, status);
+function routeErrorResponse(message: string, status: int): ServerResponse {
+    return createJsonResponse({ error: message }, status);
 }
 
 export class RouteResolution {
     routeName: string;
     handler: Optional<RouteHandler>;
     context: Optional<RouteContext>;
-    response: Optional<Response>;
+    response: Optional<ServerResponse>;
 
     constructor(
         routeName: string,
         handler: Optional<RouteHandler>,
         context: Optional<RouteContext>,
-        response: Optional<Response>
+        response: Optional<ServerResponse>
     ) {
         this.routeName = routeName;
         this.handler = handler;
@@ -813,7 +821,7 @@ export class RouteResolution {
     }
 }
 
-export function logRoute(req: Request, routeName: string, response: Response, startedAt: int64): void {
+export function logRoute(req: ServerRequest, routeName: string, response: ServerResponse, startedAt: int64): void {
     let durationMs: int64 = nowMs() - startedAt;
     print(
         colorLabel("route", "34"),
@@ -835,7 +843,7 @@ export class HandlerRouter {
         this.handlers = new Map<string, RouteHandler>();
     }
 
-    private register(method: string, path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+    private register(method: string, path: string, handler: (ctx: RouteContext) => ServerResponse): HandlerRouter {
         let route: RouteDefinition = new RouteDefinition(normalizeRoutePath(path), method, path);
         this.tree.addRoute(route);
         this.handlers.set(route.signature(), new RouteHandler(handler));
@@ -846,27 +854,27 @@ export class HandlerRouter {
         return this.tree.group(prefix);
     }
 
-    get(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+    get(path: string, handler: (ctx: RouteContext) => ServerResponse): HandlerRouter {
         return this.register("GET", path, handler);
     }
 
-    post(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+    post(path: string, handler: (ctx: RouteContext) => ServerResponse): HandlerRouter {
         return this.register("POST", path, handler);
     }
 
-    put(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+    put(path: string, handler: (ctx: RouteContext) => ServerResponse): HandlerRouter {
         return this.register("PUT", path, handler);
     }
 
-    patch(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+    patch(path: string, handler: (ctx: RouteContext) => ServerResponse): HandlerRouter {
         return this.register("PATCH", path, handler);
     }
 
-    deleteRoute(path: string, handler: (ctx: RouteContext) => Response): HandlerRouter {
+    deleteRoute(path: string, handler: (ctx: RouteContext) => ServerResponse): HandlerRouter {
         return this.register("DELETE", path, handler);
     }
 
-    resolve(req: Request): RouteResolution {
+    resolve(req: ServerRequest): RouteResolution {
         let lookup: RouteLookup = this.tree.lookup(stableMethod(req), stablePath(req));
         if (lookup.match == None) {
             if (lookup.allowedMethods.length() > 0) {

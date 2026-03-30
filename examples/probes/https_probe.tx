@@ -1,19 +1,26 @@
-// HTTPS smoke test for the shared HTTP module.
-import { getEnv } from "std:system";
-import { fetch } from "../../src/modules/http/index.tx";
+// HTTPS smoke test for the built-in fetch client.
+import { exit, getEnv } from "std:system";
+
+function envOrEmpty(name: string): string {
+    let value: Optional<string> = getEnv(name);
+    if (value == None) {
+        return "";
+    }
+    return value as string;
+}
 
 function main() {
     try {
-        let url = getEnv("HTTPS_PROBE_URL");
+        let url: string = envOrEmpty("HTTPS_PROBE_URL");
         if (url == "") {
             url = "https://dummyjson.com/products?limit=1";
         }
 
-        let response = fetch(url);
+        let response = fetchSync(url, { timeoutMs: 10000 });
         print("url=", url);
         print("status=", response.status);
         print("ok=", response.ok());
-        print("body_length=", response.body.length());
+        print("body_length=", response.text().length());
     } catch (error) {
         print("https_probe_error=", error);
         exit(1);

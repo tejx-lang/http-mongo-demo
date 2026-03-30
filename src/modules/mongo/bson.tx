@@ -1,7 +1,7 @@
 // BSON encoder/decoder used by the Mongo wire-protocol client.
 import std:binary;
 import { abs, floor, round, pow, ln } from "std:math";
-import { JsonObject, objectOf } from "../json/index.tx";
+import { MongoJsonObject, objectOf } from "./json.tx";
 
 function bsonTypeDouble(): int { return 1; }
 function bsonTypeString(): int { return 2; }
@@ -336,19 +336,19 @@ class BsonEncoder {
     }
 }
 
-export function encodeDocument(doc: JsonObject): int[] {
+export function encodeDocument(doc: MongoJsonObject): int[] {
     let encoder = new BsonEncoder();
     return encoder.encodeDocument(doc.toJSON());
 }
 
-export function encodeDocumentWithKeys(doc: JsonObject, keys: string[]): int[] {
+export function encodeDocumentWithKeys(doc: MongoJsonObject, keys: string[]): int[] {
     let encoder = new BsonEncoder();
     return encoder.encodeDocumentWithKeys(doc.toJSON(), keys);
 }
 
-export function bsonBinary(data: int[], subtype: int = 0): JsonObject {
+export function bsonBinary(data: int[], subtype: int = 0): MongoJsonObject {
     // Represent raw BSON binary as a plain object so higher layers can still inspect or serialize it.
-    let binaryValue: JsonObject = objectOf({});
+    let binaryValue: MongoJsonObject = objectOf({});
     binaryValue.setString("_bsonType", "binary");
     binaryValue.setInt("subtype", subtype);
     binaryValue.setIntArray("data", data);
@@ -379,7 +379,7 @@ function decodeArray(reader: ByteReader): any[] {
     return out;
 }
 
-export function decodeDocumentFromReader(reader: ByteReader): JsonObject {
+export function decodeDocumentFromReader(reader: ByteReader): MongoJsonObject {
     let length: int = reader.readI32LE();
     let endPosition: int = reader.position() + length - 5;
     let out: any = {};
@@ -404,8 +404,8 @@ export function decodeDocumentFromReader(reader: ByteReader): JsonObject {
 }
 
 function decodeEmbeddedDocumentValue(reader: ByteReader): any {
-    // Nested documents are unwrapped into plain values so outer JsonObject wrappers stay shallow and predictable.
-    let document: JsonObject = decodeDocumentFromReader(reader);
+    // Nested documents are unwrapped into plain values so outer MongoJsonObject wrappers stay shallow and predictable.
+    let document: MongoJsonObject = decodeDocumentFromReader(reader);
     return document.toJSON();
 }
 
@@ -477,7 +477,7 @@ function decodeValue(reader: ByteReader, valueType: int): any {
     throw new Error("Unsupported BSON value type " + String(valueType));
 }
 
-export function decodeDocument(data: int[]): JsonObject {
+export function decodeDocument(data: int[]): MongoJsonObject {
     let reader = binary.reader(data);
     return decodeDocumentFromReader(reader);
 }

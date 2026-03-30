@@ -1,0 +1,176 @@
+// Small request-body JSON extractor used as a runtime-safe fallback for POST/PUT payloads.
+
+class JsonStringRead {
+    ok: bool;
+    value: string;
+    nextIndex: int;
+
+    constructor(ok: bool, value: string, nextIndex: int) {
+        this.ok = ok;
+        this.value = value;
+        this.nextIndex = nextIndex;
+    }
+}
+
+function skipWhitespace(text: string, start: int): int {
+    let index: int = start;
+    while (index < text.length()) {
+        let ch: string = text.substring(index, index + 1);
+        if (ch == " " || ch == "\n" || ch == "\r" || ch == "\t") {
+            index = index + 1;
+            continue;
+        }
+        break;
+    }
+    return index;
+}
+
+function findValueStart(text: string, key: string): int {
+    let marker: string = "\"" + key + "\"";
+    let markerIndex: int = text.indexOf(marker);
+    if (markerIndex < 0) {
+        return -1;
+    }
+
+    let searchStart: int = markerIndex + marker.length();
+    let rest: string = text.substring(searchStart, text.length());
+    let colonOffset: int = rest.indexOf(":");
+    if (colonOffset < 0) {
+        return -1;
+    }
+
+    return skipWhitespace(text, searchStart + colonOffset + 1);
+}
+
+function readJsonString(text: string, start: int): JsonStringRead {
+    if (start < 0 || start >= text.length() || text.substring(start, start + 1) != "\"") {
+        return new JsonStringRead(false, "", start);
+    }
+
+    let index: int = start + 1;
+    let out: string = "";
+    while (index < text.length()) {
+        let ch: string = text.substring(index, index + 1);
+        if (ch == "\\") {
+            if (index + 1 >= text.length()) {
+                return new JsonStringRead(false, "", index);
+            }
+
+            let esc: string = text.substring(index + 1, index + 2);
+            if (esc == "\"") out = out + "\"";
+            else if (esc == "\\") out = out + "\\";
+            else if (esc == "/") out = out + "/";
+            else if (esc == "b") out = out + "\b";
+            else if (esc == "f") out = out + "\f";
+            else if (esc == "n") out = out + "\n";
+            else if (esc == "r") out = out + "\r";
+            else if (esc == "t") out = out + "\t";
+            else out = out + esc;
+            index = index + 2;
+            continue;
+        }
+
+        if (ch == "\"") {
+            return new JsonStringRead(true, out, index + 1);
+        }
+
+        out = out + ch;
+        index = index + 1;
+    }
+
+    return new JsonStringRead(false, "", index);
+}
+
+export function hasJsonField(text: string, key: string): bool {
+    return findValueStart(text, key) >= 0;
+}
+
+export function jsonString(text: string, key: string): string {
+    return jsonStringOr(text, key, "");
+}
+
+export function jsonStringOr(text: string, key: string, fallback: string): string {
+    let start: int = findValueStart(text, key);
+    if (start < 0) {
+        return fallback;
+    }
+
+    let read: JsonStringRead = readJsonString(text, start);
+    if (!read.ok) {
+        return fallback;
+    }
+    return read.value;
+}
+
+export function jsonFloatOr(text: string, key: string, fallback: float): float {
+    let start: int = findValueStart(text, key);
+    if (start < 0) {
+        return fallback;
+    }
+
+    let index: int = start;
+    let raw: string = "";
+    while (index < text.length()) {
+        let ch: string = text.substring(index, index + 1);
+        if ((ch >= "0" && ch <= "9") || ch == "-" || ch == "+" || ch == "." || ch == "e" || ch == "E") {
+            raw = raw + ch;
+            index = index + 1;
+            continue;
+        }
+        break;
+    }
+
+    if (raw == "") {
+        return fallback;
+    }
+
+    return parseFloat(raw);
+}
+
+export function jsonIntOr(text: string, key: string, fallback: int): int {
+    return jsonFloatOr(text, key, fallback as float) as int;
+}
+
+export function jsonStringArray(text: string, key: string): string[] {
+    let start: int = findValueStart(text, key);
+    if (start < 0 || text.substring(start, start + 1) != "[") {
+        return [];
+    }
+
+    let index: int = start + 1;
+    let out: string[] = [];
+    while (index < text.length()) {
+        index = skipWhitespace(text, index);
+        if (index >= text.length()) {
+            return [];
+        }
+
+        let ch: string = text.substring(index, index + 1);
+        if (ch == "]") {
+            return out;
+        }
+
+        let read: JsonStringRead = readJsonString(text, index);
+        if (!read.ok) {
+            return [];
+        }
+
+        out.push(read.value);
+        index = skipWhitespace(text, read.nextIndex);
+        if (index >= text.length()) {
+            return out;
+        }
+
+        let next: string = text.substring(index, index + 1);
+        if (next == ",") {
+            index = index + 1;
+            continue;
+        }
+        if (next == "]") {
+            return out;
+        }
+        return [];
+    }
+
+    return out;
+}

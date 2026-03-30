@@ -1,7 +1,8 @@
 // Login endpoint implementation.
 import { nowMs } from "std:time";
-import { JsonObject, objectOf, parseObject } from "../../../modules/json/index.tx";
-import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+import { JsonObject, objectOf, plainJson } from "../../helpers/json.tx";
+import { jsonString } from "../../helpers/request_json.tx";
+import { ServerResponse, createJsonResponse } from "../../../modules/server/index.tx";
 import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
 import { AppUser } from "../users/model.tx";
@@ -39,14 +40,10 @@ function loginPayload(body: string): LoginPayload {
         throw new Error("Request body is required");
     }
 
-    let payload: JsonObject = parseObject(body);
-    return new LoginPayload(
-        payload.string("email"),
-        payload.string("password")
-    );
+    return new LoginPayload(jsonString(body, "email"), jsonString(body, "password"));
 }
 
-export function handleLogin(method: string, body: string, state: AppState): Response {
+export function handleLogin(method: string, body: string, state: AppState): ServerResponse {
     if (method != "POST") {
         return jsonError("Method not allowed", 405);
     }
@@ -57,7 +54,6 @@ export function handleLogin(method: string, body: string, state: AppState): Resp
         if (payload.email == "" || payload.password == "") {
             return jsonError("email and password are required", 400);
         }
-
         let userValue: Optional<AppUser> = findUserByEmailAddress(state.users, payload.email);
         if (userValue == None) {
             return jsonError("Invalid credentials", 401);
@@ -68,10 +64,11 @@ export function handleLogin(method: string, body: string, state: AppState): Resp
             return jsonError("Invalid credentials", 401);
         }
 
-        return createJsonResponse(new LoginResponse(
+        let body: JsonObject = new LoginResponse(
             "token-" + user.id + "-" + String(nowMs()),
             user
-        ).toJSON(), 200);
+        ).toJSON();
+        return createJsonResponse(plainJson(body), 200);
     } catch (error) {
         return jsonError("Invalid JSON body", 400);
     }

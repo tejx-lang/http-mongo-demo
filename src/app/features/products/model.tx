@@ -1,6 +1,6 @@
 // Product domain types plus persistence and response shapes.
 import { Map } from "std:collections";
-import { JsonObject, objectOf } from "../../../modules/json/index.tx";
+import { JsonObject, objectOf } from "../../helpers/json.tx";
 
 function cloneStrings(values: string[]): string[] {
     let out: string[] = [];
@@ -171,6 +171,10 @@ export function productsToDocument(products: ProductCollection): ProductCollecti
 }
 
 export function lowStockProductsToDocument(products: ProductCollection, threshold: int = 10): ProductCollectionView {
+    if (threshold <= 0) {
+        threshold = 10;
+    }
+
     let view: ProductCollectionView = new ProductCollectionView();
 
     for (let i: int = 0; i < products.ids.length(); i++) {

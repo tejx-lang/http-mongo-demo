@@ -1,0 +1,186 @@
+// Lightweight in-memory search across the loaded app state.
+import { JsonObject, objectOf, plainJson } from "../../helpers/json.tx";
+import { ServerResponse, createJsonResponse } from "../../../modules/server/index.tx";
+import { jsonError } from "../../core/responses.tx";
+import { AppState } from "../../core/state.tx";
+import { EventCollection, AppEvent, eventsToDocument } from "../events/model.tx";
+import { OrderCollection, AppOrder, ordersToDocument } from "../orders/model.tx";
+import { ProductCollection, AppProduct, productsToDocument } from "../products/model.tx";
+import { AppUser, UserCollection, usersToDocument } from "../users/model.tx";
+
+function normalized(text: string): string {
+    return text.trim().toLowerCase();
+}
+
+function matchesText(value: string, query: string): bool {
+    if (query == "") {
+        return false;
+    }
+
+    return normalized(value).includes(query);
+}
+
+function userMatches(user: AppUser, query: string): bool {
+    return matchesText(user.id, query)
+        || matchesText(user.name, query)
+        || matchesText(user.email, query)
+        || matchesText(user.role, query);
+}
+
+function productMatches(product: AppProduct, query: string): bool {
+    return matchesText(product.id, query)
+        || matchesText(product.name, query)
+        || matchesText(product.category, query);
+}
+
+function orderMatches(order: AppOrder, query: string): bool {
+    if (matchesText(order.id, query) || matchesText(order.userId, query) || matchesText(order.status, query)) {
+        return true;
+    }
+
+    for (let i: int = 0; i < order.productIds.length(); i++) {
+        if (matchesText(order.productIds[i], query)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function eventMatches(event: AppEvent, query: string): bool {
+    return matchesText(event.id, query)
+        || matchesText(event.action, query)
+        || matchesText(event.entity, query)
+        || matchesText(event.entityId, query);
+}
+
+function matchedUsers(state: AppState, query: string): UserCollection {
+    let out: UserCollection = new UserCollection();
+
+    for (let i: int = 0; i < state.users.ids.length(); i++) {
+        let userId: string = state.users.ids[i];
+        let userValue: Optional<AppUser> = state.users.items.get(userId);
+        if (userValue == None) {
+            continue;
+        }
+
+        let user: AppUser = userValue as AppUser;
+        if (userMatches(user, query)) {
+            out.ids.push(userId);
+            out.items.set(userId, user);
+        }
+    }
+
+    return out;
+}
+
+function matchedProducts(state: AppState, query: string): ProductCollection {
+    let out: ProductCollection = new ProductCollection();
+
+    for (let i: int = 0; i < state.products.ids.length(); i++) {
+        let productId: string = state.products.ids[i];
+        let productValue: Optional<AppProduct> = state.products.items.get(productId);
+        if (productValue == None) {
+            continue;
+        }
+
+        let product: AppProduct = productValue as AppProduct;
+        if (productMatches(product, query)) {
+            out.ids.push(productId);
+            out.items.set(productId, product);
+        }
+    }
+
+    return out;
+}
+
+function matchedOrders(state: AppState, query: string): OrderCollection {
+    let out: OrderCollection = new OrderCollection();
+
+    for (let i: int = 0; i < state.orders.ids.length(); i++) {
+        let orderId: string = state.orders.ids[i];
+        let orderValue: Optional<AppOrder> = state.orders.items.get(orderId);
+        if (orderValue == None) {
+            continue;
+        }
+
+        let order: AppOrder = orderValue as AppOrder;
+        if (orderMatches(order, query)) {
+            out.ids.push(orderId);
+            out.items.set(orderId, order);
+        }
+    }
+
+    return out;
+}
+
+function matchedEvents(state: AppState, query: string): EventCollection {
+    let out: EventCollection = new EventCollection();
+
+    for (let i: int = 0; i < state.events.ids.length(); i++) {
+        let eventId: string = state.events.ids[i];
+        let eventValue: Optional<AppEvent> = state.events.items.get(eventId);
+        if (eventValue == None) {
+            continue;
+        }
+
+        let event: AppEvent = eventValue as AppEvent;
+        if (eventMatches(event, query)) {
+            out.ids.push(eventId);
+            out.items.set(eventId, event);
+        }
+    }
+
+    return out;
+}
+
+class SearchResponse {
+    query: string;
+    count: int;
+    users: UserCollection;
+    products: ProductCollection;
+    orders: OrderCollection;
+    events: EventCollection;
+
+    constructor(
+        query: string,
+        users: UserCollection,
+        products: ProductCollection,
+        orders: OrderCollection,
+        events: EventCollection
+    ) {
+        this.query = query;
+        this.users = users;
+        this.products = products;
+        this.orders = orders;
+        this.events = events;
+        this.count = users.ids.length() + products.ids.length() + orders.ids.length() + events.ids.length();
+    }
+
+    toJSON(): JsonObject {
+        let out: JsonObject = objectOf({});
+        out.setString("query", this.query);
+        out.setInt("count", this.count);
+        out.setObject("users", usersToDocument(this.users).toJSON());
+        out.setObject("products", productsToDocument(this.products).toJSON());
+        out.setObject("orders", ordersToDocument(this.orders).toJSON());
+        out.setObject("events", eventsToDocument(this.events).toJSON());
+        return out;
+    }
+}
+
+export function handleSearch(method: string, queryText: string, state: AppState): ServerResponse {
+    if (method != "GET") {
+        return jsonError("Method not allowed", 405);
+    }
+
+    let query: string = normalized(queryText);
+    let body: JsonObject = new SearchResponse(
+        queryText,
+        matchedUsers(state, query),
+        matchedProducts(state, query),
+        matchedOrders(state, query),
+        matchedEvents(state, query)
+    ).toJSON();
+    return createJsonResponse(plainJson(body), 200);
+}

@@ -1,7 +1,7 @@
 // Public Mongo module surface. Callers should depend on this file instead of internal protocol details.
 import { primeMongoConnection, MongoClient } from "./client.tx";
-import { MongoConnectionConfig } from "./config.tx";
-import { JsonObject } from "../json/index.tx";
+import { MongoConnectionConfig, cloneConnectionConfig } from "./config.tx";
+import { MongoJsonObject } from "./json.tx";
 
 export class MongoConnection {
     uri: string;
@@ -60,27 +60,27 @@ export class MongoDatabase extends MongoClient {
         super.ping();
     }
 
-    find(collection: string, filter: JsonObject): JsonObject[] {
+    find(collection: string, filter: MongoJsonObject): MongoJsonObject[] {
         return super.find(collection, filter);
     }
 
-    findOne(collection: string, filter: JsonObject): Optional<JsonObject> {
+    findOne(collection: string, filter: MongoJsonObject): Optional<MongoJsonObject> {
         return super.findOne(collection, filter);
     }
 
-    insertOne(collection: string, document: JsonObject): JsonObject {
+    insertOne(collection: string, document: MongoJsonObject): MongoJsonObject {
         return super.insertOne(collection, document);
     }
 
-    updateOne(collection: string, filter: JsonObject, setFields: JsonObject): JsonObject {
+    updateOne(collection: string, filter: MongoJsonObject, setFields: MongoJsonObject): MongoJsonObject {
         return super.updateOne(collection, filter, setFields);
     }
 
-    upsertOne(collection: string, filter: JsonObject, setFields: JsonObject): JsonObject {
+    upsertOne(collection: string, filter: MongoJsonObject, setFields: MongoJsonObject): MongoJsonObject {
         return super.upsertOne(collection, filter, setFields);
     }
 
-    deleteOne(collection: string, filter: JsonObject): JsonObject {
+    deleteOne(collection: string, filter: MongoJsonObject): MongoJsonObject {
         return super.deleteOne(collection, filter);
     }
 

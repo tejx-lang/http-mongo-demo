@@ -1,7 +1,7 @@
 // Public external feature entrypoint.
-import { Response } from "../../../modules/server/index.tx";
+import { ServerResponse } from "../../../modules/server/index.tx";
 import { handleExternal } from "./handler.tx";
 
-export function handleExternalRoute(method: string): Response {
+export function handleExternalRoute(method: string): ServerResponse {
     return handleExternal(method);
 }

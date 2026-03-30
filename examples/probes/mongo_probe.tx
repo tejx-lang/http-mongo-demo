@@ -1,4 +1,5 @@
 // Probe that talks to Mongo through the app's bootstrap and load paths.
+import { exit } from "std:system";
 import { resolveMongoConnection } from "../../src/app/config/env.tx";
 import { MongoConnection, openMongo } from "../../src/modules/mongo/index.tx";
 import { ensureAppState, loadAppState } from "../../src/app/core/store.tx";
@@ -19,9 +20,10 @@ function main() {
         ensureAppState(client);
         print("probe_step=load_db");
         let db: AppState = loadAppState(client);
-        print("probe_meta_name=", db.meta.name);
         print("probe_users_count=", db.users.ids.length());
         print("probe_products_count=", db.products.ids.length());
+        print("probe_orders_count=", db.orders.ids.length());
+        print("probe_events_count=", db.events.ids.length());
         print("mongo_probe=ok");
     } catch (error) {
         print("mongo_probe_error=", error);

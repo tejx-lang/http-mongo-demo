@@ -1,14 +1,13 @@
 // The in-memory request snapshot passed between route handlers during one request.
 import { MongoDatabase } from "../../modules/mongo/index.tx";
 import { EventCollection } from "../features/events/model.tx";
-import { AppMeta } from "../features/meta/model.tx";
+
 import { OrderCollection } from "../features/orders/model.tx";
 import { ProductCollection } from "../features/products/model.tx";
 import { UserCollection } from "../features/users/model.tx";
 
 export class AppState {
     client: MongoDatabase;
-    meta: AppMeta;
     users: UserCollection;
     products: ProductCollection;
     orders: OrderCollection;
@@ -16,14 +15,14 @@ export class AppState {
 
     constructor(
         client: MongoDatabase,
-        meta: AppMeta,
+
         users: UserCollection,
         products: ProductCollection,
         orders: OrderCollection,
         events: EventCollection
     ) {
         this.client = client;
-        this.meta = meta;
+
         this.users = users;
         this.products = products;
         this.orders = orders;

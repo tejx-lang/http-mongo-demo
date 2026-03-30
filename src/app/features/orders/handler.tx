@@ -1,8 +1,9 @@
 // Orders CRUD handlers.
 import { Map } from "std:collections";
 import { nowMs } from "std:time";
-import { JsonObject, objectOf, parseObject } from "../../../modules/json/index.tx";
-import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+import { JsonObject, objectOf, plainJson } from "../../helpers/json.tx";
+import { hasJsonField, jsonString, jsonStringOr, jsonStringArray } from "../../helpers/request_json.tx";
+import { ServerResponse, createJsonResponse } from "../../../modules/server/index.tx";
 import { findIdIndex, nextEntityId } from "../../core/ids.tx";
 import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
@@ -45,19 +46,19 @@ function requireBody(body: string): string {
 }
 
 function parseCreateOrderPayload(body: string): CreateOrderPayload {
-    let payload: JsonObject = parseObject(requireBody(body));
+    let text: string = requireBody(body);
     return new CreateOrderPayload(
-        payload.string("userId"),
-        payload.stringArray("productIds"),
-        payload.stringOr("status", "pending")
+        jsonString(text, "userId"),
+        jsonStringArray(text, "productIds"),
+        jsonStringOr(text, "status", "pending")
     );
 }
 
 function parseUpdateOrderPayload(body: string): UpdateOrderPayload {
-    let payload: JsonObject = parseObject(requireBody(body));
+    let text: string = requireBody(body);
     return new UpdateOrderPayload(
-        payload.has("status"),
-        payload.string("status")
+        hasJsonField(text, "status"),
+        jsonString(text, "status")
     );
 }
 
@@ -88,9 +89,9 @@ function removeOrderFromState(orders: OrderCollection, id: string): void {
     orders.items = nextItems;
 }
 
-export function handleOrdersCollection(method: string, body: string, state: AppState): Response {
+export function handleOrdersCollection(method: string, body: string, state: AppState): ServerResponse {
     if (method == "GET") {
-        return createJsonResponse(ordersToDocument(state.orders).toJSON(), 200);
+        return createJsonResponse(plainJson(ordersToDocument(state.orders).toJSON()), 200);
     }
 
     if (method == "POST") {
@@ -134,7 +135,7 @@ export function handleOrdersCollection(method: string, body: string, state: AppS
             insertOrder(state.client, order);
             recordAppEvent(state, "created", "order", orderId);
             touchAppState(state);
-            return createJsonResponse(orderToView(order).toJSON(), 201);
+            return createJsonResponse(plainJson(orderToView(order).toJSON()), 201);
         } catch (error) {
             return jsonError("Invalid JSON body", 400);
         }
@@ -143,7 +144,7 @@ export function handleOrdersCollection(method: string, body: string, state: AppS
     return jsonError("Method not allowed", 405);
 }
 
-export function handleOrderItem(method: string, body: string, state: AppState, orderId: string): Response {
+export function handleOrderItem(method: string, body: string, state: AppState, orderId: string): ServerResponse {
     let orderValue: Optional<AppOrder> = getOrder(state.orders, orderId);
     if (orderValue == None) {
         return jsonError("Order not found", 404);
@@ -152,7 +153,7 @@ export function handleOrderItem(method: string, body: string, state: AppState, o
     let order: AppOrder = orderValue as AppOrder;
 
     if (method == "GET") {
-        return createJsonResponse(orderToView(order).toJSON(), 200);
+        return createJsonResponse(plainJson(orderToView(order).toJSON()), 200);
     }
 
     if (method == "PUT") {
@@ -167,7 +168,7 @@ export function handleOrderItem(method: string, body: string, state: AppState, o
             updateOrder(state.client, orderId, order);
             recordAppEvent(state, "updated", "order", orderId);
             touchAppState(state);
-            return createJsonResponse(orderToView(order).toJSON(), 200);
+            return createJsonResponse(plainJson(orderToView(order).toJSON()), 200);
         } catch (error) {
             return jsonError("Invalid JSON body", 400);
         }
@@ -182,7 +183,7 @@ export function handleOrderItem(method: string, body: string, state: AppState, o
         let deletedBody: JsonObject = objectOf({});
         deletedBody.setBool("deleted", true);
         deletedBody.setString("id", orderId);
-        return createJsonResponse(deletedBody, 200);
+        return createJsonResponse(plainJson(deletedBody), 200);
     }
 
     return jsonError("Method not allowed", 405);

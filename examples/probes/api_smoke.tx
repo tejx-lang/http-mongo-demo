@@ -1,0 +1,169 @@
+// End-to-end API smoke probe for the local TejX demo server.
+import { getEnv } from "std:system";
+import { nowMs } from "std:time";
+import { JsonObject, parseObject } from "../../src/app/helpers/json.tx";
+
+function envOrEmpty(name: string): string {
+    let value: Optional<string> = getEnv(name);
+    if (value == None) {
+        return "";
+    }
+    return value as string;
+}
+
+function resolveBaseUrl(): string {
+    let baseUrl: string = envOrEmpty("APP_BASE_URL");
+    if (baseUrl != "") {
+        return baseUrl;
+    }
+    return "http://127.0.0.1:3000";
+}
+
+function requireTrue(condition: bool, message: string): void {
+    if (!condition) {
+        throw new Error(message);
+    }
+}
+
+function expectStatus(label: string, status: int, expected: int): void {
+    if (status != expected) {
+        throw new Error(label + " expected status " + String(expected) + " but got " + String(status));
+    }
+}
+
+function requestJson(label: string, url: string, options: any, expectedStatus: int): JsonObject {
+    let response = options == None ? fetchSync(url) : fetchSync(url, options);
+    let body: string = response.text();
+    print(label + " status=", response.status);
+    expectStatus(label, response.status, expectedStatus);
+    return parseObject(body);
+}
+
+function main() {
+    let baseUrl: string = resolveBaseUrl();
+    let suffix: string = String(nowMs());
+    let email: string = "smoke-" + suffix + "-demo";
+    let searchNeedle: string = suffix;
+
+    let root: JsonObject = requestJson("GET /", baseUrl + "/", None, 200);
+    requireTrue(root.string("message") != "", "welcome route should return a message");
+
+    let health: JsonObject = requestJson("GET /health", baseUrl + "/health", None, 200);
+    requireTrue(health.string("status") == "ok", "health route should report ok");
+
+    let emptySearch: JsonObject = requestJson("GET /api/search", baseUrl + "/api/search?q=" + searchNeedle, None, 200);
+    requireTrue(emptySearch.int("count") == 0, "empty database search should start at zero matches");
+
+    requestJson("GET /api/users", baseUrl + "/api/users", None, 200);
+    requestJson("GET /api/products", baseUrl + "/api/products", None, 200);
+    requestJson("GET /api/orders", baseUrl + "/api/orders", None, 200);
+    requestJson("GET /api/events", baseUrl + "/api/events", None, 200);
+
+    let createdUser: JsonObject = requestJson("POST /api/users", baseUrl + "/api/users", {
+        method: "POST",
+        body: {
+            name: "Smoke User " + suffix,
+            email: email,
+            password: "smoke123",
+            role: "customer"
+        }
+    }, 201);
+    let userId: string = createdUser.string("id");
+    requireTrue(userId != "", "created user should have an id");
+
+    let firstProduct: JsonObject = requestJson("POST /api/products", baseUrl + "/api/products", {
+        method: "POST",
+        body: {
+            name: "Keyboard " + suffix,
+            price: 99.99,
+            stock: 5,
+            category: "accessories"
+        }
+    }, 201);
+    let firstProductId: string = firstProduct.string("id");
+
+    let secondProduct: JsonObject = requestJson("POST /api/products", baseUrl + "/api/products", {
+        method: "POST",
+        body: {
+            name: "Mouse " + suffix,
+            price: 49.5,
+            stock: 8,
+            category: "accessories"
+        }
+    }, 201);
+    let secondProductId: string = secondProduct.string("id");
+
+    let login: JsonObject = requestJson("POST /api/auth/login", baseUrl + "/api/auth/login", {
+        method: "POST",
+        body: {
+            email: email,
+            password: "smoke123"
+        }
+    }, 200);
+    requireTrue(login.string("token") != "", "login should return a token");
+
+    let createdOrder: JsonObject = requestJson("POST /api/orders", baseUrl + "/api/orders", {
+        method: "POST",
+        body: {
+            userId: userId,
+            productIds: [firstProductId, secondProductId]
+        }
+    }, 201);
+    let orderId: string = createdOrder.string("id");
+    requireTrue(orderId != "", "created order should have an id");
+
+    requestJson("GET /api/users/:id", baseUrl + "/api/users/" + userId, None, 200);
+    requestJson("GET /api/products/:id", baseUrl + "/api/products/" + firstProductId, None, 200);
+    requestJson("GET /api/orders/:id", baseUrl + "/api/orders/" + orderId, None, 200);
+
+    let updatedUser: JsonObject = requestJson("PUT /api/users/:id", baseUrl + "/api/users/" + userId, {
+        method: "PUT",
+        body: {
+            role: "admin"
+        }
+    }, 200);
+    requireTrue(updatedUser.string("role") == "admin", "user role update should be applied");
+
+    let updatedProduct: JsonObject = requestJson("PUT /api/products/:id", baseUrl + "/api/products/" + firstProductId, {
+        method: "PUT",
+        body: {
+            stock: 3
+        }
+    }, 200);
+    requireTrue(updatedProduct.int("stock") == 3, "product stock update should be applied");
+
+    let updatedOrder: JsonObject = requestJson("PUT /api/orders/:id", baseUrl + "/api/orders/" + orderId, {
+        method: "PUT",
+        body: {
+            status: "paid"
+        }
+    }, 200);
+    requireTrue(updatedOrder.string("status") == "paid", "order status update should be applied");
+
+    let report: JsonObject = requestJson("GET /api/reports/summary", baseUrl + "/api/reports/summary", None, 200);
+    let summaryValue: Optional<JsonObject> = report.object("summary");
+    requireTrue(summaryValue != None, "reports endpoint should return a summary object");
+
+    let searchHit: JsonObject = requestJson("GET /api/search?q=suffix", baseUrl + "/api/search?q=" + searchNeedle, None, 200);
+    requireTrue(searchHit.int("count") > 0, "search should find created records");
+
+    let events: JsonObject = requestJson("GET /api/events", baseUrl + "/api/events", None, 200);
+    requireTrue(events.int("count") > 0, "events should be recorded for mutations");
+
+    let external: JsonObject = requestJson("GET /api/external", baseUrl + "/api/external", None, 200);
+    requireTrue(external.has("id"), "external endpoint should return a product-like payload");
+
+    requestJson("DELETE /api/orders/:id", baseUrl + "/api/orders/" + orderId, { method: "DELETE" }, 200);
+    requestJson("DELETE /api/products/:id", baseUrl + "/api/products/" + firstProductId, { method: "DELETE" }, 200);
+    requestJson("DELETE /api/products/:id", baseUrl + "/api/products/" + secondProductId, { method: "DELETE" }, 200);
+    requestJson("DELETE /api/users/:id", baseUrl + "/api/users/" + userId, { method: "DELETE" }, 200);
+
+    let finalUsers: JsonObject = requestJson("GET /api/users", baseUrl + "/api/users", None, 200);
+    let finalProducts: JsonObject = requestJson("GET /api/products", baseUrl + "/api/products", None, 200);
+    let finalOrders: JsonObject = requestJson("GET /api/orders", baseUrl + "/api/orders", None, 200);
+    requireTrue(finalUsers.int("count") == 0, "users collection should be empty after cleanup");
+    requireTrue(finalProducts.int("count") == 0, "products collection should be empty after cleanup");
+    requireTrue(finalOrders.int("count") == 0, "orders collection should be empty after cleanup");
+
+    print("api_smoke=ok");
+}

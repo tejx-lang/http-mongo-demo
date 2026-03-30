@@ -1,10 +1,9 @@
 // Reporting endpoint that summarizes the current in-memory application state.
-import { JsonObject, objectOf } from "../../../modules/json/index.tx";
-import { Response, createJsonResponse } from "../../../modules/server/index.tx";
+import { JsonObject, objectOf, plainJson } from "../../helpers/json.tx";
+import { ServerResponse, createJsonResponse } from "../../../modules/server/index.tx";
 import { jsonError } from "../../core/responses.tx";
 import { AppState } from "../../core/state.tx";
-import { MetaDocument } from "../meta/model.tx";
-import { toMetaView } from "../meta/index.tx";
+
 import { totalRevenue } from "../orders/index.tx";
 import { ProductCollectionView } from "../products/model.tx";
 import { lowStockProductsView } from "../products/index.tx";
@@ -41,33 +40,30 @@ class DatabaseSummaryView {
 
 // Response envelope returned by the reports endpoint.
 class SummaryResponseView {
-    database: MetaDocument;
     summary: DatabaseSummaryView;
     storage: string;
 
-    constructor(database: MetaDocument, summary: DatabaseSummaryView, storage: string) {
-        this.database = database;
+    constructor(summary: DatabaseSummaryView, storage: string) {
         this.summary = summary;
         this.storage = storage;
     }
 
     toJSON(): JsonObject {
         let out: JsonObject = objectOf({});
-        out.setObject("database", this.database.toJSON());
         out.setObject("summary", this.summary.toJSON());
         out.setString("storage", this.storage);
         return out;
     }
 }
 
-export function handleSummary(method: string, storageName: string, state: AppState): Response {
+export function handleSummary(method: string, storageName: string, state: AppState): ServerResponse {
     if (method != "GET") {
         return jsonError("Method not allowed", 405);
     }
 
-    return createJsonResponse(new SummaryResponseView(
-        toMetaView(state.meta),
+    let body: JsonObject = new SummaryResponseView(
         new DatabaseSummaryView(state),
         storageName
-    ).toJSON(), 200);
+    ).toJSON();
+    return createJsonResponse(plainJson(body), 200);
 }

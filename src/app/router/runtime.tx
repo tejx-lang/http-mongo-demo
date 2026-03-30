@@ -1,6 +1,6 @@
 // Router runtime bridge: initialize the shared router once and resolve requests through the server module.
 import { nowMs } from "std:time";
-import { Request, Response, RouteContext, RouteHandler, RouteResolution, HandlerRouter, logRoute } from "../../modules/server/index.tx";
+import { ServerRequest, ServerResponse, RouteContext, RouteHandler, RouteResolution, HandlerRouter, logRoute } from "../../modules/server/index.tx";
 import { jsonError } from "../core/responses.tx";
 import { createAppRouter } from "./index.tx";
 
@@ -19,23 +19,23 @@ export function initializeAppRouter(): void {
     }
 }
 
-export function handleAppRequest(req: Request): Response {
+export function handleAppRequest(req: ServerRequest): ServerResponse {
     let startedAt: int64 = nowMs();
     let resolution: RouteResolution = appRouter().resolve(req);
     if (resolution.response != None) {
-        let routedResponse: Response = resolution.response as Response;
+        let routedResponse: ServerResponse = resolution.response as ServerResponse;
         logRoute(req, resolution.routeName, routedResponse, startedAt);
         return routedResponse;
     }
 
     if (resolution.handler == None || resolution.context == None) {
-        let failure: Response = jsonError("Route resolution failed", 500);
+        let failure: ServerResponse = jsonError("Route resolution failed", 500);
         logRoute(req, resolution.routeName, failure, startedAt);
         return failure;
     }
 
     let handler: RouteHandler = resolution.handler as RouteHandler;
-    let response: Response = handler.handle(resolution.context as RouteContext);
+    let response: ServerResponse = handler.handle(resolution.context as RouteContext);
     logRoute(req, resolution.routeName, response, startedAt);
     return response;
 }

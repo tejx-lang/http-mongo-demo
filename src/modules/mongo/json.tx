@@ -1,0 +1,259 @@
+// Mongo-local JSON wrapper used by the wire-protocol implementation.
+import std:json;
+
+function stringValue(value: any, fallback: string = ""): string {
+    if (value == None) {
+        return fallback;
+    }
+    return String(value);
+}
+
+function intValue(value: any, fallback: int = 0): int {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return value as int;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1 : 0;
+    }
+
+    return parseFloat(String(value)) as int;
+}
+
+function int64Value(value: any, fallback: int64 = 0): int64 {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "int64") {
+        return value as int64;
+    }
+    if (kind == "int" || kind == "int32") {
+        return value as int64;
+    }
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return (value as float) as int64;
+    }
+
+    return (parseFloat(String(value)) as int) as int64;
+}
+
+function floatValue(value: any, fallback: float = 0.0): float {
+    if (value == None) {
+        return fallback;
+    }
+
+    let kind: string = typeof(value);
+    if (kind == "float" || kind == "float32" || kind == "float64") {
+        return value as float;
+    }
+    if (kind == "int" || kind == "int32" || kind == "int64") {
+        return (value as int64) as float;
+    }
+    if (kind == "bool") {
+        return (value as bool) ? 1.0 : 0.0;
+    }
+
+    return parseFloat(String(value));
+}
+
+function normalizeObjectValue(value: any): any {
+    if (value == None) {
+        return {};
+    }
+
+    if (typeof(value["toJSON"]) == "function") {
+        return value.toJSON();
+    }
+
+    return value;
+}
+
+export class MongoJsonObject {
+    private values: any;
+
+    constructor(values: any) {
+        this.values = normalizeObjectValue(values);
+    }
+
+    private read<T>(key: string): Optional<T> {
+        let value: any = this.values[key];
+        if (value == None) {
+            return None;
+        }
+        return value as T;
+    }
+
+    private readRaw(key: string): Optional<any> {
+        return this.read<any>(key);
+    }
+
+    private readArray(key: string): Optional<any[]> {
+        return this.read<any[]>(key);
+    }
+
+    has(key: string): bool {
+        return this.values[key] != None;
+    }
+
+    kind(key: string): string {
+        let value: Optional<any> = this.readRaw(key);
+        if (value == None) {
+            return "None";
+        }
+        return typeof(value as any);
+    }
+
+    keys(): string[] {
+        return Object.keys(this.values);
+    }
+
+    string(key: string): string {
+        return stringValue(this.values[key], "");
+    }
+
+    int(key: string): int {
+        return intValue(this.values[key], 0);
+    }
+
+    int64(key: string): int64 {
+        return int64Value(this.values[key], 0);
+    }
+
+    float(key: string): float {
+        return floatValue(this.values[key], 0.0);
+    }
+
+    bool(key: string): bool {
+        return this.boolOr(key, false);
+    }
+
+    boolOr(key: string, fallback: bool): bool {
+        let value: Optional<any> = this.readRaw(key);
+        if (value == None) {
+            return fallback;
+        }
+
+        let runtimeValue: any = value as any;
+        let kind: string = typeof(runtimeValue);
+        if (kind == "bool") {
+            return runtimeValue as bool;
+        }
+        if (kind == "int" || kind == "int32" || kind == "int64") {
+            return (runtimeValue as int64) != 0;
+        }
+        if (kind == "float" || kind == "float32" || kind == "float64") {
+            return (runtimeValue as float) != 0.0;
+        }
+        if (kind == "string") {
+            return (runtimeValue as string) != "";
+        }
+
+        return fallback;
+    }
+
+    object(key: string): Optional<MongoJsonObject> {
+        let normalized: any = normalizeObjectValue(this.values[key]);
+        if (normalized == None || typeof(normalized) != "object") {
+            return None;
+        }
+        return new MongoJsonObject(normalized);
+    }
+
+    objectArray(key: string): MongoJsonObject[] {
+        let field: Optional<any[]> = this.readArray(key);
+        if (field == None) {
+            return [];
+        }
+
+        let out: MongoJsonObject[] = [];
+        let values: any[] = field as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(new MongoJsonObject(normalizeObjectValue(values[i])));
+        }
+        return out;
+    }
+
+    stringArray(key: string): string[] {
+        let field: Optional<any[]> = this.readArray(key);
+        if (field == None) {
+            return [];
+        }
+
+        let out: string[] = [];
+        let values: any[] = field as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(stringValue(values[i]));
+        }
+        return out;
+    }
+
+    intArray(key: string): int[] {
+        let field: Optional<any[]> = this.readArray(key);
+        if (field == None) {
+            return [];
+        }
+
+        let out: int[] = [];
+        let values: any[] = field as any[];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(intValue(values[i], 0));
+        }
+        return out;
+    }
+
+    copyField(target: MongoJsonObject, sourceKey: string, targetKey: string): void {
+        if (!this.has(sourceKey)) {
+            return;
+        }
+        target.values[targetKey] = this.values[sourceKey];
+    }
+
+    setString(key: string, value: string): void {
+        this.values[key] = value;
+    }
+
+    setInt(key: string, value: int): void {
+        this.values[key] = value;
+    }
+
+    setBool(key: string, value: bool): void {
+        this.values[key] = value;
+    }
+
+    setStringArray(key: string, values: string[]): void {
+        this.values[key] = values;
+    }
+
+    setIntArray(key: string, values: int[]): void {
+        this.values[key] = values;
+    }
+
+    setObject(key: string, value: MongoJsonObject): void {
+        this.values[key] = value.toJSON();
+    }
+
+    setObjectArray(key: string, values: MongoJsonObject[]): void {
+        let out: any[] = [];
+        for (let i: int = 0; i < values.length(); i++) {
+            out.push(values[i].toJSON());
+        }
+        this.values[key] = out;
+    }
+
+    toJSON(): any {
+        return this.values;
+    }
+}
+
+export function objectOf(value: any): MongoJsonObject {
+    return new MongoJsonObject(normalizeObjectValue(value));
+}

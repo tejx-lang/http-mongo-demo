@@ -1,6 +1,6 @@
 // Plain route handlers used directly by the app router.
-import { JsonObject, objectOf } from "../../modules/json/index.tx";
-import { Response, RouteContext, createJsonResponse } from "../../modules/server/index.tx";
+import { JsonObject, objectOf, plainJson } from "../helpers/json.tx";
+import { ServerResponse, RouteContext, createJsonResponse } from "../../modules/server/index.tx";
 import { AppRuntime, appRuntime } from "../runtime/index.tx";
 import { handleAuthRoute } from "../features/auth/index.tx";
 import { handleEventsRoute } from "../features/events/routes.tx";
@@ -8,13 +8,14 @@ import { handleExternalRoute } from "../features/external/index.tx";
 import { handleOrderRoute, handleOrdersRoute } from "../features/orders/routes.tx";
 import { handleProductRoute, handleProductsRoute } from "../features/products/routes.tx";
 import { handleReportsSummaryRoute } from "../features/reports/index.tx";
+import { handleSearchFeatureRoute } from "../features/search/index.tx";
 import { handleUserRoute, handleUsersRoute } from "../features/users/routes.tx";
 
 function runtime(): AppRuntime {
     return appRuntime();
 }
 
-export function handleWelcomeRoute(ctx: RouteContext): Response {
+export function handleWelcomeRoute(ctx: RouteContext): ServerResponse {
     let body: JsonObject = objectOf({});
     body.setString("message", "Welcome to TejX REST API");
     body.setString("version", "1.0.0");
@@ -26,63 +27,75 @@ export function handleWelcomeRoute(ctx: RouteContext): Response {
         "/api/orders",
         "/api/reports/summary",
         "/api/events",
+        "/api/search",
         "/api/external"
     ]);
-    return createJsonResponse(body, 200);
+    return createJsonResponse(plainJson(body), 200);
 }
 
-export function handleExternalPageRoute(ctx: RouteContext): Response {
+export function handleExternalPageRoute(ctx: RouteContext): ServerResponse {
     return handleExternalRoute(ctx.method());
 }
 
-export function handleHealthRoute(ctx: RouteContext): Response {
+export function handleHealthRoute(ctx: RouteContext): ServerResponse {
+    let current: AppRuntime = runtime();
+    if (ctx.method() != "GET") {
+        let methodError: JsonObject = objectOf({});
+        methodError.setString("error", "Method not allowed");
+        return createJsonResponse(plainJson(methodError), 405);
+    }
+
+    let counts: JsonObject = objectOf({});
+    counts.setInt("users", current.state.users.ids.length());
+    counts.setInt("products", current.state.products.ids.length());
+    counts.setInt("orders", current.state.orders.ids.length());
+    counts.setInt("events", current.state.events.ids.length());
+
+    let body: JsonObject = objectOf({});
+    body.setString("status", "ok");
+    body.setString("service", "tejx-http-mongo-demo");
+    body.setString("storage", current.storageName);
+    body.setObject("counts", counts);
+    return createJsonResponse(plainJson(body), 200);
+}
+
+export function handleReportsSummaryPageRoute(ctx: RouteContext): ServerResponse {
     let current: AppRuntime = runtime();
     return handleReportsSummaryRoute(ctx.method(), current.storageName, current.state);
 }
 
-export function handleReportsSummaryPageRoute(ctx: RouteContext): Response {
-    let current: AppRuntime = runtime();
-    return handleReportsSummaryRoute(ctx.method(), current.storageName, current.state);
-}
-
-export function handleAuthLoginRoute(ctx: RouteContext): Response {
+export function handleAuthLoginRoute(ctx: RouteContext): ServerResponse {
     return handleAuthRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
-export function handleUsersCollectionPageRoute(ctx: RouteContext): Response {
+export function handleUsersCollectionPageRoute(ctx: RouteContext): ServerResponse {
     return handleUsersRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
-export function handleUserItemPageRoute(ctx: RouteContext): Response {
+export function handleUserItemPageRoute(ctx: RouteContext): ServerResponse {
     return handleUserRoute(ctx.method(), ctx.body(), runtime().state, ctx.param("userId"));
 }
 
-export function handleProductsCollectionPageRoute(ctx: RouteContext): Response {
+export function handleProductsCollectionPageRoute(ctx: RouteContext): ServerResponse {
     return handleProductsRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
-export function handleProductItemPageRoute(ctx: RouteContext): Response {
+export function handleProductItemPageRoute(ctx: RouteContext): ServerResponse {
     return handleProductRoute(ctx.method(), ctx.body(), runtime().state, ctx.param("productId"));
 }
 
-export function handleOrdersCollectionPageRoute(ctx: RouteContext): Response {
+export function handleOrdersCollectionPageRoute(ctx: RouteContext): ServerResponse {
     return handleOrdersRoute(ctx.method(), ctx.body(), runtime().state);
 }
 
-export function handleOrderItemPageRoute(ctx: RouteContext): Response {
+export function handleOrderItemPageRoute(ctx: RouteContext): ServerResponse {
     return handleOrderRoute(ctx.method(), ctx.body(), runtime().state, ctx.param("orderId"));
 }
 
-export function handleEventsCollectionPageRoute(ctx: RouteContext): Response {
+export function handleEventsCollectionPageRoute(ctx: RouteContext): ServerResponse {
     return handleEventsRoute(ctx.method(), runtime().state);
 }
 
-export function handleSearchRoute(ctx: RouteContext): Response {
-    let body: JsonObject = objectOf({});
-    body.setString("error", "Search not implemented in this version");
-    let query: string = ctx.query("q");
-    if (query != "") {
-        body.setString("query", query);
-    }
-    return createJsonResponse(body, 501);
+export function handleSearchRoute(ctx: RouteContext): ServerResponse {
+    return handleSearchFeatureRoute(ctx.method(), ctx.query("q"), runtime().state);
 }

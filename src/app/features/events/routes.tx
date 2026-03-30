@@ -1,8 +1,8 @@
 // Route adapter for the events feature.
-import { Response } from "../../../modules/server/index.tx";
+import { ServerResponse } from "../../../modules/server/index.tx";
 import { AppState } from "../../core/state.tx";
 import { handleEvents } from "./handler.tx";
 
-export function handleEventsRoute(method: string, state: AppState): Response {
+export function handleEventsRoute(method: string, state: AppState): ServerResponse {
     return handleEvents(method, state);
 }
