@@ -1,11 +1,14 @@
 // Mongo persistence for products.
-import { cloneWithoutMongoFields, deleteDocument, insertDocument, toMongoDocument, updateDocument, wrapMongoDocuments } from "../../core/persistence.tx";
+import { cloneWithoutMongoFields, deleteDocument, insertDocument, persistenceIsEnabled, toMongoDocument, updateDocument, wrapMongoDocuments } from "../../core/persistence.tx";
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
 import { JsonObject, objectOf } from "../../helpers/json.tx";
 import { AppProduct, ProductCollection, productFromDocument, productToDocument } from "./model.tx";
 
 export function loadProducts(client: MongoDatabase): ProductCollection {
     let products: ProductCollection = new ProductCollection();
+    if (!persistenceIsEnabled()) {
+        return products;
+    }
     let documents: JsonObject[] = wrapMongoDocuments(client.find("products", toMongoDocument(objectOf({}))));
 
     // Rebuild the keyed in-memory collection from the stored Mongo documents.

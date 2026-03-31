@@ -1,11 +1,14 @@
 // Mongo persistence for orders.
-import { cloneWithoutMongoFields, deleteDocument, insertDocument, toMongoDocument, updateDocument, wrapMongoDocuments } from "../../core/persistence.tx";
+import { cloneWithoutMongoFields, deleteDocument, insertDocument, persistenceIsEnabled, toMongoDocument, updateDocument, wrapMongoDocuments } from "../../core/persistence.tx";
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
 import { JsonObject, objectOf } from "../../helpers/json.tx";
 import { AppOrder, OrderCollection, orderFromDocument, orderToDocument } from "./model.tx";
 
 export function loadOrders(client: MongoDatabase): OrderCollection {
     let orders: OrderCollection = new OrderCollection();
+    if (!persistenceIsEnabled()) {
+        return orders;
+    }
     let documents: JsonObject[] = wrapMongoDocuments(client.find("orders", toMongoDocument(objectOf({}))));
 
     // Rebuild the keyed in-memory collection from the stored Mongo documents.

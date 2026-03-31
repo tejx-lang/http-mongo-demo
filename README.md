@@ -26,7 +26,7 @@ These module folders are self-contained. The app does not leak into them.
 ### 2. App layer
 
 - `src/app/server.tx`
-  Bootstraps config, connects to Mongo, loads app state, initializes the router, and starts listening.
+  Bootstraps config, prefers Mongo, falls back to in-memory mode when Mongo is unavailable, loads app state, initializes the router, and starts listening.
 - `src/app/router/`
   Connects HTTP routes to feature handlers.
 - `src/app/features/`
@@ -41,18 +41,18 @@ These module folders are self-contained. The app does not leak into them.
 At startup the app:
 
 1. Resolves environment/config values.
-2. Opens a Mongo connection.
-3. Authenticates the Mongo session.
+2. Tries to open a Mongo connection.
+3. Uses Mongo-backed persistence when the database is reachable, otherwise starts in `memory://local-runtime`.
 4. Loads users, products, orders, and events into one in-memory `AppState`.
 5. Starts the HTTP server and routes all requests through that shared runtime state.
 
-On writes, the app updates:
+When Mongo is available, writes update:
 
 - the in-memory state
 - MongoDB
 - the event log
 
-This means reads are served from the loaded runtime state, while writes keep Mongo and memory in sync.
+When Mongo is not available, writes stay in memory for that process lifetime and still append to the in-memory event log.
 
 ## Project Layout
 
@@ -113,7 +113,7 @@ This means reads are served from the loaded runtime state, while writes keep Mon
 Prerequisites:
 
 - `tejxc` available on `PATH`, or installed at `~/.tejx/bin/tejxc`
-- MongoDB reachable locally or via a URI
+- MongoDB reachable locally or via a URI if you want persistent storage
 
 Build the server:
 
@@ -126,6 +126,8 @@ Run the server:
 ```bash
 ./build/server
 ```
+
+If MongoDB is not reachable, the app now still starts and serves the full demo API in memory mode. `GET /health` will then report `"storage": "memory://local-runtime"`.
 
 ## Configuration
 

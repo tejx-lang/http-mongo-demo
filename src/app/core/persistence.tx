@@ -5,6 +5,7 @@ import { MongoJsonObject } from "../../modules/mongo/json.tx";
 import { JsonObject, objectOf } from "../helpers/json.tx";
 
 let mongoConnectionState: Optional<MongoConnection> = None;
+let persistenceEnabled: int64 = 1;
 
 export function cloneWithoutMongoFields(document: JsonObject): JsonObject {
     // Keep feature models free from Mongo-specific fields such as `_id`.
@@ -63,11 +64,27 @@ export function createMongoClient(): MongoDatabase {
     return openMongo(copyMongoConnection(connection as MongoConnection));
 }
 
-export function configureDatabaseConnection(connection: MongoConnection): void {
+export function configureDatabaseConnection(connection: MongoConnection, enabled: bool = true): void {
     mongoConnectionState = copyMongoConnection(connection);
+    persistenceEnabled = enabled ? 1 : 0;
+}
+
+export function persistenceIsEnabled(): bool {
+    return persistenceEnabled != 0;
+}
+
+export function enablePersistence(): void {
+    persistenceEnabled = 1;
+}
+
+export function disablePersistence(): void {
+    persistenceEnabled = 0;
 }
 
 export function insertDocument(client: MongoDatabase, collection: string, document: JsonObject): void {
+    if (!persistenceEnabled) {
+        return;
+    }
     // Inserts map the app's `id` field onto Mongo's `_id` field before writing.
     let writer: MongoDatabase = createMongoClient();
     try {
@@ -78,6 +95,9 @@ export function insertDocument(client: MongoDatabase, collection: string, docume
 }
 
 export function updateDocument(client: MongoDatabase, collection: string, id: string, document: JsonObject): void {
+    if (!persistenceEnabled) {
+        return;
+    }
     // Updates target a document by `_id` and only persist the business fields.
     let filter: JsonObject = objectOf({});
     filter.setString("_id", id);
@@ -90,6 +110,9 @@ export function updateDocument(client: MongoDatabase, collection: string, id: st
 }
 
 export function upsertDocument(client: MongoDatabase, collection: string, filter: JsonObject, document: JsonObject): void {
+    if (!persistenceEnabled) {
+        return;
+    }
     // Upserts reuse the same field stripping rules so Mongo metadata does not leak into app models.
     let writer: MongoDatabase = createMongoClient();
     try {
@@ -100,6 +123,9 @@ export function upsertDocument(client: MongoDatabase, collection: string, filter
 }
 
 export function deleteDocument(client: MongoDatabase, collection: string, id: string): void {
+    if (!persistenceEnabled) {
+        return;
+    }
     // Deletes always target the Mongo `_id` field.
     let filter: JsonObject = objectOf({});
     filter.setString("_id", id);

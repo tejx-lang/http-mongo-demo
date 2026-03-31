@@ -1,11 +1,14 @@
 // Mongo persistence for users.
-import { cloneWithoutMongoFields, deleteDocument, insertDocument, toMongoDocument, updateDocument, wrapMongoDocuments } from "../../core/persistence.tx";
+import { cloneWithoutMongoFields, deleteDocument, insertDocument, persistenceIsEnabled, toMongoDocument, updateDocument, wrapMongoDocuments } from "../../core/persistence.tx";
 import { MongoDatabase } from "../../../modules/mongo/index.tx";
 import { JsonObject, objectOf } from "../../helpers/json.tx";
 import { AppUser, UserCollection, userFromDocument, userToDocument } from "./model.tx";
 
 export function loadUsers(client: MongoDatabase): UserCollection {
     let users: UserCollection = new UserCollection();
+    if (!persistenceIsEnabled()) {
+        return users;
+    }
     let documents: JsonObject[] = wrapMongoDocuments(client.find("users", toMongoDocument(objectOf({}))));
 
     // Rebuild the keyed in-memory collection from the stored Mongo documents.

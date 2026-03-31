@@ -827,8 +827,6 @@ export function logRoute(req: ServerRequest, routeName: string, response: Server
         colorLabel("route", "34"),
         colorMethod(stableMethod(req)),
         colorPath(stablePath(req)),
-        dimText("->"),
-        colorRoute(routeName),
         colorStatus(response.status),
         dimText("+" + String(durationMs) + "ms")
     );
